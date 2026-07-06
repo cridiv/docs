@@ -1,7 +1,7 @@
 ---
-title: "Device Fingerprinting in the Vouch SDK"
+title: "Vouch SDK Device Fingerprinting for Fraud Detection"
 sidebarTitle: "Fingerprinting"
-description: "Understand how Vouch collects device fingerprints automatically for fraud detection, and how to access or mock the fingerprint in your own code."
+description: "Learn how Vouch automatically collects device fingerprints for fraud detection, and how to call getDeviceFingerprint or mock it during testing."
 ---
 
 Device fingerprinting is the process of generating a stable, anonymous identifier for a browser or device based on its environment — things like screen resolution, installed fonts, timezone, and hardware capabilities. Vouch uses this identifier as one of the signals in its fraud assessment engine: a device that appears in multiple suspicious sessions, or that suddenly looks different from a user's established pattern, raises the risk score.

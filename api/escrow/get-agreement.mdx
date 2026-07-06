@@ -43,8 +43,8 @@ const vouch = new Vouch({ apiKey: process.env.VOUCH_API_KEY });
 
 const agreement = await vouch.escrow.status("agr_clx8f7k2z000108l4");
 
-console.log(agreement.status);              // "FUNDED"
-console.log(agreement.nombaVirtualAccountNo); // "9988771122"
+console.log(agreement.status);           // "FUNDED"
+console.log(agreement.virtualAccountNo); // "9988771122"
 ```
 
 </CodeGroup>
@@ -61,7 +61,7 @@ A successful request returns HTTP `200 OK` with the full agreement object.
   The current lifecycle status of the agreement. See the [status reference](#agreement-status-reference) below for all possible values.
 </ResponseField>
 
-<ResponseField name="nombaVirtualAccountNo" type="string | null">
+<ResponseField name="virtualAccountNo" type="string | null">
   The virtual bank account number linked to this agreement. This is `null` until a successful `GREEN` or `AMBER` risk assessment has been completed for the agreement.
 </ResponseField>
 
@@ -109,7 +109,7 @@ A successful request returns HTTP `200 OK` with the full agreement object.
 {
   "id": "agr_clx8f7k2z000108l4",
   "status": "FUNDED",
-  "nombaVirtualAccountNo": "9988771122",
+  "virtualAccountNo": "9988771122",
   "totalAmount": 500000,
   "currency": "NGN",
   "milestones": [

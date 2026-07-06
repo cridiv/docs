@@ -1,19 +1,16 @@
 ---
 title: "Fraud Detection: Real-Time Risk Scoring & Signals"
 sidebarTitle: "Fraud Detection"
-description: "Understand how Vouch scores transactions in real time using device fingerprinting, behavioral signals, and a hybrid deterministic and ML engine."
+description: "Understand how Vouch scores transactions in real time using device fingerprinting, behavioral signals, and identity data to return a GREEN, AMBER, or RED risk flag."
 ---
 
 Fraud detection gives you a real-time risk score for any user action — a login, a payment, an account update, or an escrow funding event. For each call to `vouch.fraud.assess()`, Vouch collects device and behavioral data, evaluates it against a library of fraud signals, and returns a numeric score alongside a categorical flag and a human-readable recommendation. You branch your application logic on the flag: proceed, review, or block.
 
 ## How the scoring engine works
 
-Vouch uses a hybrid scoring engine that combines two complementary approaches:
+Vouch evaluates each call to `vouch.fraud.assess()` against a library of device, network, behavioral, and identity signals. When a signal fires, it contributes to the overall risk score. Multiple signals compound — a single elevated signal may produce an AMBER result, while several serious signals firing together can push the score into RED territory.
 
-- **Deterministic rules (60% weight):** Hard-coded signal checks that fire when specific conditions are met — for example, a VPN being active, or the same device appearing in two geographically impossible locations within a short time window. These rules are fast, transparent, and predictable.
-- **LightGBM ML model (40% weight):** A gradient-boosted decision tree trained on historical transaction patterns. The model identifies subtle anomalies — unusual timing, atypical transaction sizes for a given user, or unusual session behaviour — that rules alone would miss.
-
-The final score is a weighted combination of both outputs, normalised to an integer between 0 and 100.
+The final score is an integer between 0 and 100. Vouch returns this score alongside a categorical flag so your application can branch on a simple GREEN / AMBER / RED value rather than implementing its own scoring thresholds.
 
 <Note>
   Fail-safe behaviour: if the scoring engine encounters an internal error at any point during evaluation, Vouch defaults to an `AMBER` flag. The engine never auto-approves a transaction on failure — your manual review queue will catch edge cases before any funds move.
@@ -87,6 +84,10 @@ The `triggeredSignals` array in the response lists every signal that contributed
 
 <ResponseField name="recommendation" type="string">
   A human-readable string describing the suggested action — for example, `"Proceed with transaction"`, `"Require additional verification"`, or `"Block transaction immediately"`.
+</ResponseField>
+
+<ResponseField name="category" type="string">
+  A human-readable risk category label corresponding to the flag — for example, `"Low Risk"`, `"Elevated Risk"`, or `"High Risk"`. Use this value for display in dashboards or audit logs.
 </ResponseField>
 
 ## Testing in development

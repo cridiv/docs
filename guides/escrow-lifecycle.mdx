@@ -24,8 +24,8 @@ Consider a concrete example throughout this guide: a client (buyer) hires a free
       totalAmount: 500000,                 // amount in the smallest currency unit (kobo, cents, etc.)
       currency: 'NGN',
       milestones: [
-        { description: 'Website design mockups', amount: 150000 },
-        { description: 'Full development and deployment', amount: 350000 },
+        { title: 'Website design mockups', amount: 150000 },
+        { title: 'Full development and deployment', amount: 350000 },
       ],
       buyerEmail: 'client@example.com',
       buyerName: 'Adaeze Okafor',
@@ -182,8 +182,8 @@ async function runEscrowLifecycle() {
     totalAmount: 500000,
     currency: 'NGN',
     milestones: [
-      { description: 'Website design mockups', amount: 150000 },
-      { description: 'Full development and deployment', amount: 350000 },
+      { title: 'Website design mockups', amount: 150000 },
+      { title: 'Full development and deployment', amount: 350000 },
     ],
     buyerEmail: 'client@example.com',
     buyerName: 'Adaeze Okafor',

@@ -1,7 +1,7 @@
 ---
-title: "Managing Escrow Agreements with the Vouch SDK"
+title: "Vouch SDK Escrow: Create and Manage Payment Agreements"
 sidebarTitle: "Escrow"
-description: "Create milestone-based escrow agreements, assess payment risk, confirm deliverables, and track agreement status through the full lifecycle."
+description: "Create milestone-based escrow agreements, run fraud checks before payment, confirm deliverables, and track agreement status through the full lifecycle."
 ---
 
 The escrow module orchestrates structured payment agreements between a buyer and a seller. You break a transaction into milestones, Vouch holds the funds, and disbursement happens only after both parties confirm each milestone. The module also runs a fraud assessment at the payment step, so you catch bad actors before funds are ever collected.
@@ -34,7 +34,7 @@ const agreement = await vouch.escrow.create({
 });
 
 console.log('Agreement ID:', agreement.id);
-console.log('Virtual account:', agreement.nombaVirtualAccountNo);
+console.log('Virtual account:', agreement.virtualAccountNo);
 ```
 
 ### Parameters
@@ -89,7 +89,11 @@ console.log('Virtual account:', agreement.nombaVirtualAccountNo);
   Current lifecycle status of the agreement. See the status reference at the end of this page.
 </ResponseField>
 
-<ResponseField name="nombaVirtualAccountNo" type="string | null">
+<ResponseField name="virtualAccountId" type="string | null">
+  A virtual account identifier assigned to this agreement. May be `null` until the agreement is ready to receive funds.
+</ResponseField>
+
+<ResponseField name="virtualAccountNo" type="string | null">
   A virtual account number the buyer can pay into. May be `null` until the agreement is ready to receive funds.
 </ResponseField>
 

@@ -1,7 +1,7 @@
 ---
-title: "Authentication — API Keys and Request Security"
+title: "Authentication — Vouch API Keys and Request Security"
 sidebarTitle: "Authentication"
-description: "Learn how Vouch API keys work, how to generate them, and how to keep them secure in both server-side and client-side environments."
+description: "Learn how Vouch API keys work, how to generate and rotate them, and how to keep them secure in server-side and client-side environments."
 ---
 
 Every request to the Vouch API must include a valid API key. Vouch uses a simple API key scheme — no OAuth flows, no token exchange, no session management. You include your key in the `x-api-key` header of each HTTP request, and the Vouch backend validates it before processing anything.
@@ -58,18 +58,18 @@ Omitting the header, or supplying an invalid value, results in a `401` response 
 
 ## Environment variables
 
-Store your API key and optional URL override as environment variables rather than hard-coded strings. The SDK reads these two variables by convention:
+Store your API key and optional URL override as environment variables rather than hard-coded strings.
 
-| Variable | Purpose | Example value |
+| Variable | How it is used | Example value |
 |---|---|---|
-| `VOUCH_API_KEY` | Your API key | `vouch_live_8f9a2b3c...` |
-| `VOUCH_API_URL` | Override the default base URL | `https://staging.example.com/v1` |
+| `VOUCH_API_KEY` | Convention for storing your key. Pass it to the constructor: `new Vouch(process.env.VOUCH_API_KEY!)` | `vouch_live_8f9a2b3c...` |
+| `VOUCH_API_URL` | **Read automatically by the SDK** at start-up. Overrides the default base URL without any code change. | `https://staging.example.com/v1` |
 
-`VOUCH_API_URL` defaults to `https://vouch-fmql.onrender.com/v1` when not set. Override it to point at a local proxy, a staging environment, or a self-hosted Vouch instance.
+`VOUCH_API_URL` defaults to `https://vouch-fmql.onrender.com/v1` when not set. Override it to point at a local proxy, a staging environment, or a self-hosted Vouch instance. You can achieve the same effect by passing `options.apiUrl` to the constructor.
 
 ```bash .env
 VOUCH_API_KEY=vouch_live_8f9a2b3c...
-VOUCH_API_URL=https://vouch-fmql.onrender.com/v1
+VOUCH_API_URL=https://staging.example.com/v1  # optional — omit to use the default
 ```
 
 ## Security best practices

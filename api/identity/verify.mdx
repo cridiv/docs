@@ -1,6 +1,6 @@
 ---
 title: "Verify User Identity with Document and Selfie"
-sidebarTitle: "POST /identity/verify"
+sidebarTitle: "Verify Identity"
 description: "Submit a government ID and selfie frames to verify a user's identity. Returns a match score, liveness result, and verified status."
 ---
 
@@ -20,11 +20,11 @@ POST https://vouch-fmql.onrender.com/v1/identity/verify
 </ParamField>
 
 <ParamField body="document_image" type="file" required>
-  A JPEG or PNG image of the user's government-issued ID. Maximum file size is 5 MB. Accepted document types are `passport`, `drivers_license`, `national_id`, and `voters_card`. Ensure the image is well-lit and all four corners of the document are visible.
+  A JPEG or PNG image of the user's government-issued ID. Maximum file size is 10 MB. Accepted document types are `passport`, `drivers_license`, `national_id`, and `voters_card`. Ensure the image is well-lit and all four corners of the document are visible.
 </ParamField>
 
-<ParamField body="selfie_images[]" type="file[]" required>
-  One or more JPEG or PNG selfie frames of the user's face, each up to 5 MB. Providing multiple frames from a short video improves liveness detection accuracy. At least one frame must be supplied.
+<ParamField body="selfie_images" type="file[]" required>
+  One or more JPEG or PNG selfie frames of the user's face, each up to 10 MB. Providing multiple frames from a short video improves liveness detection accuracy. At least one frame must be supplied. Submit each frame as a separate field named `selfie_images`.
 </ParamField>
 
 <ParamField body="device_fingerprint" type="string">
@@ -40,8 +40,8 @@ curl -X POST https://vouch-fmql.onrender.com/v1/identity/verify \
   -H "x-api-key: <your-key>" \
   -F "external_user_id=user-abc-123" \
   -F "document_image=@/path/to/id-document.jpg" \
-  -F "selfie_images[]=@/path/to/selfie-frame-1.jpg" \
-  -F "selfie_images[]=@/path/to/selfie-frame-2.jpg" \
+  -F "selfie_images=@/path/to/selfie-frame-1.jpg" \
+  -F "selfie_images=@/path/to/selfie-frame-2.jpg" \
   -F "device_fingerprint=abc123def456"
 ```
 
@@ -72,7 +72,7 @@ console.log(result.data.identityMatchScore); // 0-99
 </ResponseField>
 
 <ResponseField name="message" type="string">
-  A human-readable description of the result, such as `"Identity verified successfully"` or `"Identity verification failed"`.
+  A human-readable description of the result, such as `"Identity verified successfully"` or `"Identity verification unsuccessful"`.
 </ResponseField>
 
 <ResponseField name="data" type="object">
@@ -81,7 +81,7 @@ console.log(result.data.identityMatchScore); // 0-99
   <Expandable title="data fields">
 
     <ResponseField name="id" type="string">
-      Vouch's internal ID for this verification record, e.g. `"usr_1715698234567"`.
+      Vouch's internal ID for this verification record, e.g. `"idv_1715698234567"`.
     </ResponseField>
 
     <ResponseField name="externalUserId" type="string">
@@ -114,7 +114,7 @@ console.log(result.data.identityMatchScore); // 0-99
   "status": "success",
   "message": "Identity verified successfully",
   "data": {
-    "id": "usr_1715698234567",
+    "id": "idv_1715698234567",
     "externalUserId": "user-abc-123",
     "identityVerified": true,
     "identityMatchScore": 94,
@@ -129,14 +129,14 @@ console.log(result.data.identityMatchScore); // 0-99
 ```json
 {
   "status": "failed",
-  "message": "Identity verification failed",
+  "message": "Identity verification unsuccessful",
   "data": {
-    "id": "usr_1715698234567",
+    "id": "idv_1715698234568",
     "externalUserId": "user-abc-123",
     "identityVerified": false,
     "identityMatchScore": 42,
     "livenessPassed": false,
-    "documentType": "nin"
+    "documentType": "national_id"
   }
 }
 ```

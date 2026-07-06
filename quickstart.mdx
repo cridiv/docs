@@ -1,7 +1,7 @@
 ---
-title: "Quickstart — Up and Running with Vouch in Minutes"
+title: "Quickstart — Up and Running with Vouch SDK in 5 Minutes"
 sidebarTitle: "Quickstart"
-description: "Install vouch-sdk, grab an API key, and run your first identity check and fraud assessment in under five minutes."
+description: "Install vouch-sdk, provision an API key, and make your first identity verification and fraud assessment call in under five minutes."
 ---
 
 This guide walks you through everything you need to make your first Vouch API calls — from installing the package to handling a real fraud assessment response. By the end you will have a working integration you can build on.
@@ -54,10 +54,18 @@ This guide walks you through everything you need to make your first Vouch API ca
     const vouch = new Vouch(process.env.VOUCH_API_KEY!);
     ```
 
-    The constructor accepts only the API key. The SDK automatically attaches it as the `x-api-key` header on every request it makes, so you never need to manage authentication manually.
+    The constructor accepts the API key as its first argument and an optional `options` object as its second. The SDK stores the key and attaches it as the `x-api-key` header on every outbound request — you never need to manage authentication manually.
+
+    ```typescript
+    // With optional URL overrides
+    const vouch = new Vouch(process.env.VOUCH_API_KEY!, {
+      apiUrl: 'https://staging.example.com/v1',       // override API base URL
+      verifyUrl: 'https://your-custom-modal.example.com', // override KYC modal URL
+    });
+    ```
 
     <Tip>
-      Set the `VOUCH_API_URL` environment variable to override the default backend URL (`https://vouch-fmql.onrender.com/v1`). This is useful when you are running a local Vouch proxy or pointing at a staging environment: `VOUCH_API_URL=https://staging.example.com/v1`.
+      The SDK reads the `VOUCH_API_URL` environment variable automatically at start-up. Set it to override the default base URL (`https://vouch-fmql.onrender.com/v1`) without changing any code — for example when pointing at a local proxy or a staging environment: `VOUCH_API_URL=https://staging.example.com/v1`. You can also pass `options.apiUrl` to the constructor for the same effect.
     </Tip>
   </Step>
 
@@ -70,7 +78,7 @@ This guide walks you through everything you need to make your first Vouch API ca
         const result = await vouch.identity.verify(userId);
 
         if (result.status === 'verified') {
-          console.log('User verified:', result.verificationId);
+          console.log('User verified:', result.data.id);
           // Grant access, update your database, etc.
         } else {
           console.warn('Verification incomplete:', result.status);
@@ -99,17 +107,17 @@ This guide walks you through everything you need to make your first Vouch API ca
       switch (assessment.flag) {
         case 'GREEN':
           // Proceed with the transaction
-          console.log('Low risk — proceeding:', assessment.riskScore);
+          console.log('Low risk — proceeding:', assessment.score);
           break;
 
         case 'AMBER':
           // Require additional verification before proceeding
-          console.warn('Elevated risk — requesting step-up auth:', assessment.signals);
+          console.warn('Elevated risk — requesting step-up auth:', assessment.triggeredSignals);
           break;
 
         case 'RED':
           // Block the transaction and alert your trust & safety team
-          console.error('High risk — transaction blocked:', assessment.signals);
+          console.error('High risk — transaction blocked:', assessment.triggeredSignals);
           break;
       }
     }
@@ -117,7 +125,7 @@ This guide walks you through everything you need to make your first Vouch API ca
     checkFraudRisk('user-12345', 2500);
     ```
 
-    The `assessment.signals` array lists the specific factors that influenced the score, so you can surface actionable context in your internal tooling or user-facing messages.
+    The `assessment.triggeredSignals` array lists the specific factors that influenced the score, so you can surface actionable context in your internal tooling or user-facing messages.
   </Step>
 </Steps>
 

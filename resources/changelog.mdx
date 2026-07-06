@@ -1,7 +1,7 @@
 ---
-title: "Vouch SDK Version History and Changelog"
+title: "Vouch SDK Changelog: Version History and Release Notes"
 sidebarTitle: "Changelog"
-description: "A complete version history of the Vouch SDK, including new features, improvements, and integration changes across every release."
+description: "A complete version history of the Vouch SDK, including new features, improvements, and breaking integration changes across every release."
 ---
 
 This page tracks every release of the Vouch SDK (`vouch-sdk`), from the initial launch through the current version. Each entry lists what changed, what was added, and any details you need to know when upgrading. Start with the current release and work backwards to understand what has changed since the version you are running.
@@ -13,7 +13,7 @@ This page tracks every release of the Vouch SDK (`vouch-sdk`), from the initial 
 The current production release of the Vouch SDK. This version delivers a more reliable escrow funding experience and introduces a richer set of agreement status transitions.
 
 **Payment Infrastructure**
-- Replaced Squad API with the **Nomba payment gateway** for virtual account provisioning and payment collection. Existing integration code that calls `vouch.escrow.createAgreement()` requires no changes — the gateway switch is transparent at the SDK level.
+- Updated payment infrastructure for improved virtual account reliability. Existing integration code that calls `vouch.escrow.createAgreement()` requires no changes — the improvement is transparent at the SDK level.
 - Improved virtual account provisioning reliability, reducing provisioning failures on agreement creation.
 
 **Escrow Status Machine**

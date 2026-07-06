@@ -4,12 +4,12 @@ sidebarTitle: "Provision Account"
 description: "Create a new Vouch developer account with an email and password. This is the first step to accessing the API and generating authentication keys."
 ---
 
-Provisioning a developer account is the starting point for integrating Vouch into your platform. This is a public endpoint — no API key is required — and it takes just an email address and a password to get you set up. Once your account is created, visit the Vouch dashboard or call the [Generate API Key](/api/developer/api-keys) endpoint to obtain the credentials you need to authenticate all subsequent API requests.
+Provisioning a developer account is the starting point for integrating Vouch into your platform. This is a **public endpoint** — no API key is required — and it takes just an email address and a password to get you set up. Once your account is created, you will receive an API key in the response that you can use to authenticate all subsequent requests. You can also generate additional keys at any time via the [Generate API Key](/api/developer/api-keys) endpoint.
 
 ## Endpoint
 
 ```
-POST /v1/developer/provision
+POST /v1/developer/signup
 ```
 
 This endpoint is **public** and does not require an `x-api-key` header.
@@ -26,65 +26,79 @@ This endpoint is **public** and does not require an `x-api-key` header.
   A password to secure your developer account. Choose a strong password — a minimum of 8 characters including a mix of letters, numbers, and symbols is recommended.
 </ParamField>
 
+<ParamField body="name" type="string">
+  An optional display name for your developer account. Defaults to the local part of your email address if not provided.
+</ParamField>
+
 ## Examples
 
 <CodeGroup>
 
 ```bash cURL
 curl --request POST \
-  --url https://vouch-fmql.onrender.com/v1/developer/provision \
+  --url https://vouch-fmql.onrender.com/v1/developer/signup \
   --header "Content-Type: application/json" \
   --data '{
     "email": "dev@example.com",
-    "password": "your-password"
+    "password": "your-secure-password"
   }'
 ```
 
 ```typescript TypeScript
 const response = await fetch(
-  "https://vouch-fmql.onrender.com/v1/developer/provision",
+  "https://vouch-fmql.onrender.com/v1/developer/signup",
   {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       email: "dev@example.com",
-      password: "your-password",
+      password: "your-secure-password",
     }),
   }
 );
 
-const developer = await response.json();
-console.log(developer.id); // "dev_abc123"
+const { developerId, apiKey } = await response.json();
+
+// Store your API key immediately — treat it like a password
+console.log("Developer ID:", developerId);
+console.log("API Key:", apiKey);
 ```
 
 </CodeGroup>
 
 ## Response
 
-A successful request returns HTTP `201 Created` with your new developer account details.
+A successful request returns HTTP `201 Created` with your new developer account details and an initial API key.
 
-<ResponseField name="id" type="string">
-  Vouch's unique identifier for your developer account, prefixed with `dev_`. Keep this on hand — it appears in agreement objects and audit logs.
+<ResponseField name="developerId" type="string">
+  Vouch's unique identifier for your developer account. This appears in agreement objects and audit logs.
 </ResponseField>
 
-<ResponseField name="email" type="string">
-  The email address associated with the account, echoed back for confirmation.
+<ResponseField name="apiKey" type="string">
+  Your initial API key. Use this as the `x-api-key` header value to authenticate all subsequent API requests. Store it securely — treat it like a password and never commit it to version control.
 </ResponseField>
 
-<ResponseField name="message" type="string">
-  A human-readable status message confirming the account was created and pointing you to your next step.
+<ResponseField name="developer" type="object">
+  The full developer account object, including your `id`, `email`, and account metadata.
 </ResponseField>
 
-<Note>
-  After provisioning, your account does not automatically include an API key. Visit the **Vouch dashboard** or call [POST /v1/developer/api-keys](/api/developer/api-keys) to generate your first key. You'll need that key to authenticate every subsequent request.
-</Note>
+<Warning>
+  **Store your API key immediately.** Vouch does not store keys in plain text. If you lose it, you will need to generate a new one via [POST /v1/developer/api-keys](/api/developer/api-keys).
+</Warning>
 
 ### Example Response
 
 ```json
 {
-  "id": "dev_abc123",
-  "email": "dev@example.com",
-  "message": "Developer account provisioned. Check the dashboard for your API key."
+  "developerId": "dev_abc123",
+  "apiKey": "vouch_live_8f9a2b3c4d5e6f7a...",
+  "developer": {
+    "id": "dev_abc123",
+    "email": "dev@example.com"
+  }
 }
 ```
+
+<Note>
+  To generate additional API keys — for example, separate keys for staging and production — call [POST /v1/developer/api-keys](/api/developer/api-keys) with your existing key in the `x-api-key` header.
+</Note>

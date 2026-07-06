@@ -130,7 +130,7 @@ A successful request returns HTTP `201 Created` with the full agreement object.
   Current lifecycle status of the agreement. Newly created agreements always start as `PENDING`.
 </ResponseField>
 
-<ResponseField name="nombaVirtualAccountNo" type="string | null">
+<ResponseField name="virtualAccountNo" type="string | null">
   The virtual bank account number used to fund this agreement. This is `null` until a successful payment risk assessment is completed with a `GREEN` or `AMBER` flag.
 </ResponseField>
 
@@ -185,7 +185,7 @@ A successful request returns HTTP `201 Created` with the full agreement object.
   "buyerExternalId": "client_buyer_123",
   "sellerExternalId": "client_seller_456",
   "status": "PENDING",
-  "nombaVirtualAccountNo": null,
+  "virtualAccountNo": null,
   "totalAmount": 500000,
   "currency": "NGN",
   "createdAt": "2026-07-01T12:00:00.000Z",
