@@ -1,0 +1,56 @@
+---
+title: "Introduction to Vouch Trust Infrastructure SDK"
+sidebarTitle: "Introduction"
+description: "Discover how Vouch's identity verification, fraud detection, and escrow modules help you build safer, more trusted digital marketplaces."
+---
+
+Vouch is a trust infrastructure SDK built for developers who are tired of stitching together three separate vendors every time they launch a marketplace or B2B platform. Instead of managing a KYC provider, a fraud-scoring service, and a payments escrow layer independently, you get all three as first-class modules in a single TypeScript package — each backed by the same AI engine, sharing the same user context, and accessed through one consistent API.
+
+## Why Vouch exists
+
+Every marketplace faces the same trust problems: you need to know your users are who they claim to be, you need to catch bad actors before they cause damage, and you need a neutral way to hold funds until both sides of a transaction are satisfied. Solving these problems individually means multiple integration projects, multiple compliance reviews, and multiple failure surfaces. Vouch collapses that complexity into a single SDK so you can focus on your product instead of your plumbing.
+
+## Core capabilities
+
+Vouch exposes three modules that cover the full lifecycle of a trusted transaction.
+
+<CardGroup cols={3}>
+  <Card title="Identity Verification" icon="id-card" href="/sdk/identity">
+    Launch a zero-click KYC modal or submit documents directly. Vouch runs liveness checks, document authentication, and AI-powered review — and returns a structured verification result.
+  </Card>
+  <Card title="Fraud Detection" icon="shield-halved" href="/sdk/fraud">
+    Score any user action or transaction in real time. Vouch returns a GREEN, AMBER, or RED flag along with the signals that drove the decision, so you can act immediately.
+  </Card>
+  <Card title="Escrow Management" icon="vault" href="/sdk/escrow">
+    Create milestone-based escrow accounts, track their status, assess release readiness, and confirm payouts — all programmatically, without touching a payments dashboard.
+  </Card>
+</CardGroup>
+
+## How it works
+
+When you call any Vouch SDK method, the SDK serialises your request and sends it to the Vouch backend at `https://vouch-fmql.onrender.com/v1` over HTTPS, authenticated with your API key. The backend routes the request to the appropriate AI engine — identity, fraud, or escrow — processes it, and returns a structured JSON response. You never communicate with the AI engine directly; the SDK and backend handle all of that on your behalf.
+
+```
+Your app  →  vouch-sdk  →  Vouch API  →  AI engine
+                ↑                             |
+                └─────── JSON response ───────┘
+```
+
+The SDK is stateless on the client side. Every method call is an independent HTTPS request, which means you can call Vouch from serverless functions, long-running servers, or edge runtimes without managing sessions or background workers.
+
+## Requirements
+
+Before you integrate Vouch, make sure your environment meets these prerequisites.
+
+| Requirement | Minimum version |
+|---|---|
+| Node.js (server-side) | 18.0 or later |
+| TypeScript | 5.0 or later |
+| Browser (client-side) | Any modern browser with `fetch` and `FormData` support |
+| `vouch-sdk` package | 1.3.0 |
+
+<Note>
+  The `vouch-sdk` package is published as pure ESM. If your project uses CommonJS, configure your bundler (esbuild, Webpack, Rollup) to transpile ESM dependencies, or use a dynamic `import()` call.
+</Note>
+
+Ready to integrate? Head to the [Quickstart](/quickstart) to install the SDK and make your first API call in under five minutes.

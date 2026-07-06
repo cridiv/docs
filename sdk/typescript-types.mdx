@@ -1,0 +1,264 @@
+---
+title: "TypeScript Type Reference for the Vouch SDK"
+sidebarTitle: "TypeScript Types"
+description: "Full TypeScript interface definitions exported by vouch-sdk, covering identity, fraud, escrow, and SDK configuration types."
+---
+
+The Vouch SDK ships with complete TypeScript type declarations. Every parameter object, response shape, and configuration option has a corresponding exported interface, so your editor can provide autocomplete and catch mismatches at compile time rather than at runtime.
+
+Import any combination of interfaces using `import type` — the type-only import syntax ensures none of these contribute to your bundle:
+
+```typescript
+import type {
+  IdentityVerifyResult,
+  FraudAssessParams,
+  FraudAssessResult,
+  CreateAgreementParams,
+  AgreementResponse,
+  AssessPaymentParams,
+  AssessPaymentResponse,
+  MilestoneInput,
+  VouchOptions,
+} from 'vouch-sdk';
+```
+
+<Tip>
+  Use these interfaces to build type-safe service wrappers and repository layers in your application. Wrapping SDK calls behind a typed interface makes them easier to test in isolation and keeps your domain logic decoupled from the SDK directly.
+</Tip>
+
+---
+
+## `VouchOptions`
+
+Configuration options for the `Vouch` constructor. Pass this as the second argument to override default URLs.
+
+```typescript
+export interface VouchOptions {
+  apiUrl?: string;
+  verifyUrl?: string;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiUrl` | `string` | Override the backend API base URL. Defaults to `https://vouch-fmql.onrender.com/v1`. |
+| `verifyUrl` | `string` | Override the hosted identity modal URL. Defaults to `https://vouch-modal.vercel.app`. |
+
+---
+
+## `IdentityVerifyResult`
+
+Returned by both `vouch.identity.verify()` and `vouch.identity.submitVerification()`. The `data` object contains the decision fields you should act on.
+
+```typescript
+export interface IdentityVerifyResult {
+  status: string;
+  message: string;
+  data: {
+    id: string;
+    externalUserId: string;
+    identityVerified: boolean;
+    identityMatchScore?: number | null;
+    livenessPassed: boolean;
+    documentType?: string | null;
+  };
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | `string` | `"success"` or `"failed"` — the top-level outcome. |
+| `message` | `string` | Human-readable description of the result. |
+| `data.id` | `string` | Vouch-assigned verification record ID. |
+| `data.externalUserId` | `string` | Your user ID, echoed back. |
+| `data.identityVerified` | `boolean` | Primary decision field — `true` when document and selfie matched. |
+| `data.identityMatchScore` | `number \| null` | Match confidence from 0–99. `null` if comparison failed. |
+| `data.livenessPassed` | `boolean` | `true` if anti-spoofing liveness check passed. |
+| `data.documentType` | `string \| null` | `"passport"`, `"drivers_license"`, `"national_id"`, or `null`. |
+
+---
+
+## `FraudAssessParams`
+
+Input to `vouch.fraud.assess()`. Describes the user and transaction being evaluated.
+
+```typescript
+export interface FraudAssessParams {
+  platformUserId: string;
+  agreementId?: string;
+  transactionAmount: number;
+  simulateVpn?: boolean;
+  simulateImpossibleTravel?: boolean;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `platformUserId` | `string` | Required. Your platform's identifier for the user. |
+| `transactionAmount` | `number` | Required. Transaction value in base currency units. |
+| `agreementId` | `string` | Optional. Links the assessment to an escrow agreement. |
+| `simulateVpn` | `boolean` | Optional. Testing only — simulates VPN detection. |
+| `simulateImpossibleTravel` | `boolean` | Optional. Testing only — simulates impossible travel. |
+
+---
+
+## `FraudAssessResult`
+
+Returned by `vouch.fraud.assess()`. Drive automated decisions from `flag`; use `score` and `triggeredSignals` for analytics and audit trails.
+
+```typescript
+export interface FraudAssessResult {
+  score: number;
+  flag: 'GREEN' | 'AMBER' | 'RED';
+  category: string;
+  triggeredSignals: string[];
+  recommendation: string;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `score` | `number` | Risk score from 0 (low) to 100 (critical). |
+| `flag` | `'GREEN' \| 'AMBER' \| 'RED'` | Recommended action band. |
+| `category` | `string` | `"Low Risk"`, `"Elevated Risk"`, `"High Risk"`, or `"Critical"`. |
+| `triggeredSignals` | `string[]` | Names of the signals that contributed to the score. |
+| `recommendation` | `string` | Plain-English action guidance. |
+
+---
+
+## `MilestoneInput`
+
+A single milestone entry in the `milestones` array when creating an escrow agreement.
+
+```typescript
+export interface MilestoneInput {
+  title: string;
+  amount: number;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | `string` | Descriptive label for the milestone, shown to both parties. |
+| `amount` | `number` | Value of this milestone in base currency units. |
+
+---
+
+## `CreateAgreementParams`
+
+Input to `vouch.escrow.create()`. Defines the parties, total amount, currency, and milestone breakdown.
+
+```typescript
+export interface CreateAgreementParams {
+  buyerExternalId: string;
+  sellerExternalId: string;
+  totalAmount: number;
+  currency?: string;
+  milestones: MilestoneInput[];
+  buyerEmail?: string;
+  buyerName?: string;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `buyerExternalId` | `string` | Required. Your platform's identifier for the buyer. |
+| `sellerExternalId` | `string` | Required. Your platform's identifier for the seller. |
+| `totalAmount` | `number` | Required. Total agreement value in base currency units. |
+| `currency` | `string` | ISO 4217 code. Defaults to `"NGN"`. |
+| `milestones` | `MilestoneInput[]` | Required. Ordered list of deliverable milestones. |
+| `buyerEmail` | `string` | Optional. Buyer's email for notifications. |
+| `buyerName` | `string` | Optional. Buyer's display name. |
+
+---
+
+## `AgreementResponse`
+
+Returned by `vouch.escrow.create()` and `vouch.escrow.status()`. Contains the full agreement record including all milestone states.
+
+```typescript
+export interface AgreementResponse {
+  id: string;
+  developerId: string;
+  buyerExternalId: string;
+  sellerExternalId: string;
+  status: string;
+  nombaVirtualAccountNo?: string | null;
+  totalAmount: number;
+  currency: string;
+  createdAt: string;
+  milestones: {
+    id: string;
+    title: string;
+    amount: number;
+    buyerConfirmed: boolean;
+    sellerConfirmed: boolean;
+    status: string;
+  }[];
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Vouch-assigned agreement ID. |
+| `developerId` | `string` | Your developer account ID. |
+| `buyerExternalId` | `string` | Buyer's platform ID. |
+| `sellerExternalId` | `string` | Seller's platform ID. |
+| `status` | `string` | Lifecycle status (e.g., `PENDING`, `FUNDED`, `COMPLETED`). |
+| `nombaVirtualAccountNo` | `string \| null` | Virtual account for buyer payments, if available. |
+| `totalAmount` | `number` | Total agreement value. |
+| `currency` | `string` | Currency code. |
+| `createdAt` | `string` | ISO 8601 creation timestamp. |
+| `milestones` | `object[]` | Milestone records with confirmation and status fields. |
+
+---
+
+## `AssessPaymentParams`
+
+Input to `vouch.escrow.assess()`. Describes the buyer and the payment amount being assessed before funds are collected.
+
+```typescript
+export interface AssessPaymentParams {
+  externalUserId: string;
+  transactionAmount: number;
+  simulateVpn?: boolean;
+  simulateImpossibleTravel?: boolean;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `externalUserId` | `string` | Required. Your platform's identifier for the payer. |
+| `transactionAmount` | `number` | Required. Payment amount in base currency units. |
+| `simulateVpn` | `boolean` | Optional. Testing only. |
+| `simulateImpossibleTravel` | `boolean` | Optional. Testing only. |
+
+---
+
+## `AssessPaymentResponse`
+
+Returned by `vouch.escrow.assess()`. Contains the fraud decision and, on non-RED outcomes, the virtual account details for payment collection.
+
+```typescript
+export interface AssessPaymentResponse {
+  score: number;
+  flag: string;
+  virtualAccount?: {
+    accountNumber: string;
+    bankCode: string;
+    accountName: string;
+  };
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `score` | `number` | Fraud risk score from 0–100. |
+| `flag` | `string` | `"GREEN"`, `"AMBER"`, or `"RED"`. |
+| `virtualAccount.accountNumber` | `string` | Virtual account number for the buyer to pay into. |
+| `virtualAccount.bankCode` | `string` | Bank code of the receiving institution. |
+| `virtualAccount.accountName` | `string` | Account name on the virtual account. |
+
+<Note>
+  `virtualAccount` is omitted from the response when `flag` is `"RED"`. Always check the flag before attempting to read payment details.
+</Note>

@@ -1,0 +1,110 @@
+---
+title: "Authentication — API Keys and Request Security"
+sidebarTitle: "Authentication"
+description: "Learn how Vouch API keys work, how to generate them, and how to keep them secure in both server-side and client-side environments."
+---
+
+Every request to the Vouch API must include a valid API key. Vouch uses a simple API key scheme — no OAuth flows, no token exchange, no session management. You include your key in the `x-api-key` header of each HTTP request, and the Vouch backend validates it before processing anything.
+
+## How API keys work
+
+When the Vouch backend receives a request, it reads the `x-api-key` header and looks up the associated developer account. If the key is valid and active, the request proceeds. If the key is missing, expired, or revoked, the API returns a `401 Unauthorized` response immediately — no part of the request is processed.
+
+Keys follow a fixed format and begin with the `vouch_live_` prefix, for example:
+
+```
+vouch_live_8f9a2b3c4d5e6f7a8b9c0d1e2f3a4b5c
+```
+
+This prefix makes it easy to identify Vouch keys in code reviews, secret-scanning tools, and audit logs.
+
+## Getting an API key
+
+You can generate an API key in two ways.
+
+**From the dashboard** — Sign in to your Vouch developer account, navigate to **Settings → API Keys**, and click **Generate new key**. Copy the key immediately; the dashboard only displays it once.
+
+**From the API** — Send a `POST` request to `/v1/developer/api-keys` using an existing key to authenticate. See the [API reference](/api/developer/api-keys) for the full request schema.
+
+<Note>
+  If you do not have a Vouch developer account yet, provision one by sending a `POST` request to `/v1/developer/provision` with your email and platform details. The response includes your first API key.
+</Note>
+
+## Using your key with the SDK
+
+Pass your API key to the `Vouch` constructor once when you initialise the client. The SDK stores it internally and attaches it as the `x-api-key` header on every outbound request — you never need to set the header yourself.
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+```
+
+All subsequent calls on the `vouch` instance — `vouch.identity.verify(...)`, `vouch.fraud.assess(...)`, `vouch.escrow.create(...)` — are automatically authenticated.
+
+## Using your key with direct HTTP requests
+
+If you are calling the Vouch API directly without the SDK, add the `x-api-key` header to every request.
+
+```bash
+curl https://vouch-fmql.onrender.com/v1/identity/verify \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'x-api-key: vouch_live_8f9a2b3c...' \
+  -d '{"externalUserId": "user-12345"}'
+```
+
+Omitting the header, or supplying an invalid value, results in a `401` response (see [Error responses](#error-responses) below).
+
+## Environment variables
+
+Store your API key and optional URL override as environment variables rather than hard-coded strings. The SDK reads these two variables by convention:
+
+| Variable | Purpose | Example value |
+|---|---|---|
+| `VOUCH_API_KEY` | Your API key | `vouch_live_8f9a2b3c...` |
+| `VOUCH_API_URL` | Override the default base URL | `https://staging.example.com/v1` |
+
+`VOUCH_API_URL` defaults to `https://vouch-fmql.onrender.com/v1` when not set. Override it to point at a local proxy, a staging environment, or a self-hosted Vouch instance.
+
+```bash .env
+VOUCH_API_KEY=vouch_live_8f9a2b3c...
+VOUCH_API_URL=https://vouch-fmql.onrender.com/v1
+```
+
+## Security best practices
+
+<Warning>
+  **Never expose your API key in client-side code.** If your key appears in a browser bundle, a mobile app binary, or a public repository, anyone who finds it can make authenticated requests on your behalf. Follow these rules to keep your key safe:
+
+  - Store keys in environment variables or a secrets manager (AWS Secrets Manager, Doppler, Vault), never in source files.
+  - Call Vouch from server-side code (Node.js functions, edge functions, API routes) so the key never reaches the browser.
+  - Rotate your key immediately if you suspect it has been compromised — generate a new one from the dashboard and revoke the old one.
+  - Use separate keys for development, staging, and production environments so a leaked dev key cannot affect live data.
+</Warning>
+
+## Error responses
+
+When authentication fails, the API returns a `401 Unauthorized` status with a JSON body describing the problem.
+
+**Missing key**
+
+```json
+{
+  "error": "Unauthorized",
+  "message": "Missing x-api-key header. Include your API key in every request.",
+  "statusCode": 401
+}
+```
+
+**Invalid or revoked key**
+
+```json
+{
+  "error": "Unauthorized",
+  "message": "Invalid API key. Check that the key is correct and has not been revoked.",
+  "statusCode": 401
+}
+```
+
+If you receive a `401` response unexpectedly, verify that the key is being passed in the `x-api-key` header (not `Authorization` or another header), and confirm that the key has not been revoked in the dashboard.

@@ -1,0 +1,57 @@
+---
+title: "Device Fingerprinting in the Vouch SDK"
+sidebarTitle: "Fingerprinting"
+description: "Understand how Vouch collects device fingerprints automatically for fraud detection, and how to access or mock the fingerprint in your own code."
+---
+
+Device fingerprinting is the process of generating a stable, anonymous identifier for a browser or device based on its environment — things like screen resolution, installed fonts, timezone, and hardware capabilities. Vouch uses this identifier as one of the signals in its fraud assessment engine: a device that appears in multiple suspicious sessions, or that suddenly looks different from a user's established pattern, raises the risk score.
+
+For most integrations, you do not need to think about fingerprinting at all. The SDK collects it automatically whenever you call `vouch.fraud.assess()` or `vouch.escrow.assess()`, and sends it along with the request in the background.
+
+## How it works in the browser
+
+In a browser environment, Vouch uses [FingerprintJS](https://github.com/fingerprintjs/fingerprintjs) to generate a `visitorId` — a stable string that represents the current device and browser profile. This value is collected once per session and cached in memory, so subsequent SDK calls reuse the same identifier without triggering additional computation or network requests.
+
+## How it works in Node.js
+
+In a Node.js or server-side environment, there is no browser context to fingerprint. The SDK returns the static string `'node-server-fingerprint'` instead. This placeholder is recognized by the Vouch API and handled appropriately — server-side requests are assessed using the other signals in the payload rather than device characteristics.
+
+## Using `getDeviceFingerprint()` directly
+
+If you need the raw fingerprint value in your own application logic — for example, to log it alongside a session record or pass it to a separate analytics service — you can import and call `getDeviceFingerprint()` directly.
+
+```typescript
+import { getDeviceFingerprint } from 'vouch-sdk';
+
+const visitorId = await getDeviceFingerprint();
+console.log('Device fingerprint:', visitorId);
+```
+
+The function returns a `Promise<string>`. In the browser, it resolves to the FingerprintJS `visitorId`. In Node.js, it resolves immediately to `'node-server-fingerprint'`.
+
+<Note>
+  The result of `getDeviceFingerprint()` is cached in memory for the lifetime of the current JavaScript session. Calling it multiple times returns the same value without re-running the fingerprinting computation.
+</Note>
+
+## Testing with a mock fingerprint
+
+When writing unit tests or running in a CI environment, you likely want a deterministic, controllable fingerprint rather than a real one. Set `globalThis.MOCK_FINGERPRINT` to any string before making SDK calls, and the SDK will use that value instead of computing a real fingerprint.
+
+```typescript
+// In your test setup file
+globalThis.MOCK_FINGERPRINT = 'test-device-fp-001';
+
+// Now all SDK calls that collect a fingerprint will use 'test-device-fp-001'
+const assessment = await vouch.fraud.assess({
+  platformUserId: 'test-user',
+  transactionAmount: 1000,
+});
+```
+
+<Warning>
+  Only set `globalThis.MOCK_FINGERPRINT` in test or development environments. Shipping this override to production will cause all users to share the same fingerprint value, which defeats fraud detection entirely.
+</Warning>
+
+<Tip>
+  Use a unique mock fingerprint value per test case when testing multi-session or multi-device fraud scenarios. Different values let you simulate distinct devices accessing the same account.
+</Tip>

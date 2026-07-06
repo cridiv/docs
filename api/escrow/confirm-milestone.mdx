@@ -1,0 +1,118 @@
+---
+title: "Confirm a Milestone Completion — Vouch API"
+sidebarTitle: "Confirm Milestone"
+description: "Register a buyer or seller confirmation on a milestone. When both parties confirm, the milestone is marked complete and disbursement is triggered automatically."
+---
+
+Milestone confirmation is how Vouch knows that work has been delivered and accepted. Either the buyer or the seller calls this endpoint to register their approval of a completed milestone. The first confirmation sets the milestone status to `BUYER_CONFIRMED` or `SELLER_CONFIRMED` depending on who called it. When the second party confirms, Vouch automatically marks the milestone as `COMPLETED` and triggers the release of the corresponding funds to the seller.
+
+## Endpoint
+
+```
+POST /v1/escrow/agreements/:id/milestones/:milestoneId/confirm
+```
+
+## Request
+
+### Headers
+
+<ParamField header="x-api-key" type="string" required>
+  Your Vouch API key.
+</ParamField>
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique ID of the parent escrow agreement (e.g. `agr_clx8f7k2z000108l4`).
+</ParamField>
+
+<ParamField path="milestoneId" type="string" required>
+  The unique ID of the milestone to confirm (e.g. `ms_001`). You can find milestone IDs in the agreement object returned by [Create Agreement](/api/escrow/create-agreement) or [Get Agreement](/api/escrow/get-agreement).
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="external_user_id" type="string" required>
+  The external ID of the party submitting the confirmation. Must match either the `buyerExternalId` or `sellerExternalId` on the agreement. Vouch uses this to determine which side is confirming.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://vouch-fmql.onrender.com/v1/escrow/agreements/agr_clx8f7k2z000108l4/milestones/ms_001/confirm \
+  --header "Content-Type: application/json" \
+  --header "x-api-key: <YOUR_API_KEY>" \
+  --data '{
+    "external_user_id": "client_buyer_123"
+  }'
+```
+
+```typescript TypeScript
+import Vouch from "@vouch/sdk";
+
+const vouch = new Vouch({ apiKey: process.env.VOUCH_API_KEY });
+
+const result = await vouch.escrow.confirm(
+  "agr_clx8f7k2z000108l4", // agreementId
+  "ms_001",                 // milestoneId
+  "client_buyer_123"        // external_user_id
+);
+
+console.log(result.milestone.status); // "BUYER_CONFIRMED"
+```
+
+</CodeGroup>
+
+## Response
+
+A successful request returns HTTP `200 OK` with a message and the updated milestone object.
+
+<ResponseField name="message" type="string">
+  A short confirmation message, e.g. `"Milestone confirmed."`.
+</ResponseField>
+
+<ResponseField name="milestone" type="object">
+  The updated milestone object reflecting the new confirmation state.
+
+  <Expandable title="milestone fields">
+    <ResponseField name="id" type="string">
+      The unique identifier of the milestone.
+    </ResponseField>
+
+    <ResponseField name="buyerConfirmed" type="boolean">
+      Whether the buyer has confirmed this milestone.
+    </ResponseField>
+
+    <ResponseField name="sellerConfirmed" type="boolean">
+      Whether the seller has confirmed this milestone.
+    </ResponseField>
+
+    <ResponseField name="status" type="string">
+      The updated milestone status. Possible values after confirmation:
+      - `BUYER_CONFIRMED` — the buyer has confirmed; awaiting seller.
+      - `SELLER_CONFIRMED` — the seller has confirmed; awaiting buyer.
+      - `COMPLETED` — both parties have confirmed; disbursement has been triggered.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Note>
+  Disbursement is fully automatic. The **first** confirmation from either party sets the status to `BUYER_CONFIRMED` or `SELLER_CONFIRMED`. The **second** confirmation — from the other party — sets the status to `COMPLETED` and immediately triggers the release of the milestone amount to the seller. You do not need to make a separate disbursement call.
+</Note>
+
+### Example Response
+
+```json
+{
+  "message": "Milestone confirmed.",
+  "milestone": {
+    "id": "ms_001",
+    "buyerConfirmed": true,
+    "sellerConfirmed": false,
+    "status": "BUYER_CONFIRMED"
+  }
+}
+```

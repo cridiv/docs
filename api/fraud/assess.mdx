@@ -1,0 +1,168 @@
+---
+title: "Assess Fraud Risk for a Transaction or User"
+sidebarTitle: "POST /fraud/assess"
+description: "Evaluate the fraud risk of a transaction in real time. Returns a risk score, flag color, triggered signals, and a recommended action."
+---
+
+The fraud assessment endpoint evaluates the risk profile of a transaction or user action in real time. You supply a platform user ID and transaction amount, and Vouch's signal engine inspects device, network, behavioral, and account-level indicators to produce a composite risk score between 0 and 100. The response includes a flag color (GREEN, AMBER, or RED), a list of any triggered signals, and a plain-language recommendation for how to proceed.
+
+```
+POST https://vouch-fmql.onrender.com/v1/fraud/assess
+```
+
+## Request
+
+**Content-Type:** `application/json`  
+**Auth:** `x-api-key: <your-key>`
+
+<ParamField body="platformUserId" type="string" required>
+  The unique identifier for the user on your platform. Vouch uses this to look up the user's verified identity status and historical risk signals.
+</ParamField>
+
+<ParamField body="transactionAmount" type="number" required>
+  The monetary value of the transaction, expressed as an integer in the smallest currency unit (e.g. kobo or cents). Vouch uses this to apply high-value transaction signal thresholds.
+</ParamField>
+
+<ParamField body="agreementId" type="string">
+  The ID of an agreement or contract associated with this transaction, if applicable. Including this value links the risk assessment to a specific agreement record in Vouch.
+</ParamField>
+
+<ParamField body="deviceFingerprint" type="string">
+  A fingerprint string identifying the device and browser session. When you use the Vouch browser SDK, this is collected automatically and does not need to be supplied manually.
+</ParamField>
+
+<ParamField body="simulateVpn" type="boolean">
+  When set to `true`, the request is processed as though a VPN was detected on the user's connection. Use this in your test environment to verify how your integration handles the `vpn_detected` signal.
+</ParamField>
+
+<ParamField body="simulateImpossibleTravel" type="boolean">
+  When set to `true`, Vouch simulates an impossible travel signal for this request. Use this in your test environment to verify how your integration handles the `impossible_travel` signal.
+</ParamField>
+
+## Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://vouch-fmql.onrender.com/v1/fraud/assess \
+  -H "x-api-key: <your-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platformUserId": "usr_abc123",
+    "transactionAmount": 250000,
+    "agreementId": "agr_xyz789",
+    "deviceFingerprint": "abc123def456",
+    "simulateVpn": false,
+    "simulateImpossibleTravel": false
+  }'
+```
+
+```typescript TypeScript SDK
+import { VouchClient } from "@vouch/sdk";
+
+const vouch = new VouchClient({ apiKey: process.env.VOUCH_API_KEY });
+
+const result = await vouch.fraud.assess({
+  platformUserId: "usr_abc123",
+  transactionAmount: 250000,
+  agreementId: "agr_xyz789",
+});
+
+if (result.flag === "RED") {
+  // Block the transaction
+} else if (result.flag === "AMBER") {
+  // Trigger step-up verification
+} else {
+  // Proceed normally
+}
+```
+
+</CodeGroup>
+
+## Response
+
+<ResponseField name="score" type="number">
+  An integer from 0 to 100 representing the overall fraud risk for this transaction. Higher scores indicate greater risk. See the flag reference table below for score-to-flag mapping.
+</ResponseField>
+
+<ResponseField name="flag" type="string">
+  A color-coded risk classification derived from the score. One of `"GREEN"`, `"AMBER"`, or `"RED"`.
+</ResponseField>
+
+<ResponseField name="category" type="string">
+  A short label describing the risk tier, such as `"Low Risk"`, `"Elevated Risk"`, or `"Critical"`.
+</ResponseField>
+
+<ResponseField name="triggeredSignals" type="string[]">
+  An array of signal identifiers that contributed to the risk score. This array is empty when no risk signals were detected. See the triggered signals reference table below for a full list of possible values.
+</ResponseField>
+
+<ResponseField name="recommendation" type="string">
+  A plain-language action recommendation based on the flag. For example: `"Transaction appears safe. Proceed normally."` or `"Block this transaction."`
+</ResponseField>
+
+### Example Responses
+
+<CodeGroup>
+
+```json GREEN — Low Risk
+{
+  "score": 23,
+  "flag": "GREEN",
+  "category": "Low Risk",
+  "triggeredSignals": [],
+  "recommendation": "Transaction appears safe. Proceed normally."
+}
+```
+
+```json AMBER — Elevated Risk
+{
+  "score": 61,
+  "flag": "AMBER",
+  "category": "Elevated Risk",
+  "triggeredSignals": ["device_mismatch", "impossible_travel"],
+  "recommendation": "Require additional verification before proceeding."
+}
+```
+
+```json RED — Critical
+{
+  "score": 87,
+  "flag": "RED",
+  "category": "Critical",
+  "triggeredSignals": ["vpn_detected", "impossible_travel"],
+  "recommendation": "Block this transaction."
+}
+```
+
+</CodeGroup>
+
+## Flag Reference
+
+Use the flag value in your application logic to decide how to handle each transaction.
+
+| Flag    | Score Range | Recommended Action          |
+|---------|-------------|------------------------------|
+| GREEN   | 0 – 39      | Proceed normally             |
+| AMBER   | 40 – 69     | Require step-up verification |
+| RED     | 70 – 100    | Block the transaction        |
+
+## Triggered Signals Reference
+
+The following signals may appear in the `triggeredSignals` array. A transaction can trigger multiple signals simultaneously.
+
+| Signal                    | Description                                                                                   |
+|---------------------------|-----------------------------------------------------------------------------------------------|
+| `vpn_detected`            | The request originated from a known VPN exit node.                                            |
+| `proxy_detected`          | The request was routed through a proxy or anonymizing service.                                |
+| `impossible_travel`       | The user's current location is geographically inconsistent with their recent activity.        |
+| `device_mismatch`         | The device fingerprint does not match any previously trusted device for this user.            |
+| `velocity_anomaly`        | An unusually high number of transactions or actions occurred in a short time window.          |
+| `identity_not_verified`   | The user has not completed identity verification on your platform.                            |
+| `new_device`              | This is the first transaction recorded from this device fingerprint.                          |
+| `new_account`             | The user account was created very recently, indicating potential synthetic identity risk.     |
+| `high_value_transaction`  | The transaction amount exceeds the threshold associated with elevated risk scrutiny.          |
+
+<Note>
+  When using the Vouch browser SDK, `deviceFingerprint` is collected automatically from the user's session and attached to every fraud assessment call. You only need to pass it manually if you are calling this endpoint server-side without the SDK.
+</Note>

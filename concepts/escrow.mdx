@@ -1,0 +1,119 @@
+---
+title: "Escrow: Milestone-Based Trust for Buyer & Seller"
+sidebarTitle: "Escrow"
+description: "Learn how Vouch holds funds in trust between a buyer and seller, provisions virtual bank accounts, and disburses on milestone confirmation."
+---
+
+Escrow protects both sides of a transaction by holding funds in trust until the agreed work is done. Instead of the buyer paying upfront and hoping the seller delivers, or the seller delivering and hoping the buyer pays, Vouch sits in the middle: the buyer deposits into a virtual account, the seller delivers, both parties confirm each milestone, and Vouch disburses automatically. Neither party can release or withhold funds unilaterally.
+
+<Note>
+  The default currency for all escrow agreements is **NGN**. To use a different currency, pass the `currency` field explicitly when calling `vouch.escrow.create()`. Confirm supported currencies with your account configuration.
+</Note>
+
+## The agreement lifecycle
+
+A Vouch escrow agreement moves through a defined sequence of steps from creation to final settlement. Follow these steps to run a complete escrow flow.
+
+<Steps>
+  <Step title="Create the agreement">
+    Call `vouch.escrow.create()` with the buyer ID, seller ID, total amount, currency, and an array of milestones. Each milestone has a description and an amount. The agreement is created in `PENDING` status — no funds have moved yet.
+  </Step>
+  <Step title="Assess fraud risk and get a virtual bank account">
+    Call `vouch.escrow.assess(agreementId, params)` to run a fraud check scoped to this funding event. If the assessment returns `GREEN`, Vouch provisions a unique virtual bank account for this agreement and returns the account details in the response. The buyer uses this account to deposit funds.
+  </Step>
+  <Step title="Buyer deposits funds">
+    The buyer transfers the agreed amount to the virtual bank account. Once the payment gateway confirms receipt, the agreement transitions from `PARTIAL` (if partially funded) to `FUNDED`. If the buyer deposits more than the agreed total, the agreement moves to `OVERFUNDED`.
+  </Step>
+  <Step title="Seller delivers the milestone">
+    The seller fulfils the deliverable described in the milestone. This step happens outside Vouch — it is the real-world work the escrow protects.
+  </Step>
+  <Step title="Both parties confirm the milestone">
+    The buyer calls `vouch.escrow.confirm(agreementId, milestoneId, buyerExternalUserId)` and the seller calls `vouch.escrow.confirm(agreementId, milestoneId, sellerExternalUserId)`. The milestone records each confirmation separately (`BUYER_CONFIRMED` or `SELLER_CONFIRMED`) until both are received, at which point the milestone transitions to `COMPLETED`.
+  </Step>
+  <Step title="Funds are disbursed">
+    Once all milestones reach `COMPLETED`, the agreement moves to `COMPLETED` status and Vouch disburses the corresponding funds to the seller's account. The agreement then transitions to `DISBURSED`. Neither party needs to take further action.
+  </Step>
+</Steps>
+
+## Agreement status state machine
+
+Agreements flow through the following statuses. Each status reflects the current funding and confirmation state of the agreement.
+
+| Status | Meaning |
+|--------|---------|
+| `PENDING` | Agreement created; no funds received yet. |
+| `PARTIAL` | Some funds received but the total has not been met. |
+| `FUNDED` | Full amount received in the virtual bank account. |
+| `OVERFUNDED` | More than the agreed total has been deposited. Excess is tracked. |
+| `IN_PROGRESS` | At least one milestone has been confirmed; the agreement is active. |
+| `COMPLETED` | All milestones have been confirmed by both parties. |
+| `DISBURSED` | Funds have been successfully released to the seller. |
+| `REFUNDED` | Funds have been returned to the buyer, typically after a dispute resolution. |
+| `FROZEN` | A RED fraud flag was triggered — the agreement is locked pending investigation. |
+
+<Warning>
+  If an agreement reaches `FROZEN` status, all fund movements are suspended. This happens when a RED fraud assessment is triggered during or after the funding phase. Contact Vouch support immediately — do not attempt to create a new agreement for the same transaction, as this may be flagged as evasion.
+</Warning>
+
+## Milestone status state machine
+
+Each milestone within an agreement has its own status that progresses independently.
+
+| Status | Meaning |
+|--------|---------|
+| `PENDING` | Neither party has confirmed this milestone yet. |
+| `BUYER_CONFIRMED` | The buyer has confirmed but the seller has not yet. |
+| `SELLER_CONFIRMED` | The seller has confirmed but the buyer has not yet. |
+| `COMPLETED` | Both parties have confirmed. Funds are queued for disbursement. |
+| `DISBURSED` | The funds for this milestone have been released to the seller. |
+
+<Note>
+  Confirmation order does not matter. The buyer can confirm before or after the seller. The milestone only transitions to `COMPLETED` once **both** confirmations are recorded — a single confirmation is never sufficient for disbursement.
+</Note>
+
+## Virtual bank accounts
+
+Every escrow agreement that passes a GREEN fraud assessment receives a unique virtual bank account provisioned by Vouch's payment gateway. This account is:
+
+- **Unique per agreement** — the same buyer creating two agreements receives two different account numbers, preventing cross-agreement payment confusion.
+- **Single-purpose** — the account is linked exclusively to this agreement's `agreementId`. Deposits to this account are automatically attributed to the correct agreement.
+- **Non-reusable** — once the agreement reaches a terminal status (`DISBURSED`, `REFUNDED`, or `FROZEN`), the virtual account is closed.
+
+The virtual account details (bank name, account number, and account name) are returned in the response to `vouch.escrow.assess()` when the fraud flag is GREEN.
+
+## Overpayment handling
+
+If the buyer deposits more than the `totalAmount` specified in the agreement, the agreement transitions to `OVERFUNDED` rather than `FUNDED`. Vouch tracks the excess amount separately. The overfunded amount is held in the virtual account and is not disbursed to the seller automatically. Resolve overpayments by either:
+
+- Refunding the excess to the buyer before proceeding, or
+- Amending the agreement total (if your integration supports agreement amendments) to absorb the additional deposit.
+
+<Tip>
+  To avoid overfunding, display the exact account details and the precise deposit amount to the buyer before they initiate the transfer. Remind them to use the exact figure — many mobile banking apps default to allowing the user to edit the amount at confirmation.
+</Tip>
+
+## Checking agreement state
+
+Call `vouch.escrow.status(agreementId)` at any point to retrieve the current status of the agreement and all of its milestones. Use this endpoint to:
+
+- Poll for payment confirmation after the buyer has been directed to the virtual bank account.
+- Check which party's milestone confirmation is still outstanding.
+- Verify that disbursement has completed before marking an order as settled in your own system.
+
+## Key parameters
+
+<ParamField body="agreementId" type="string" required>
+  The unique identifier for the escrow agreement. Returned by `vouch.escrow.create()` and required on all subsequent escrow calls.
+</ParamField>
+
+<ParamField body="milestoneId" type="string" required>
+  The unique identifier for a specific milestone within the agreement. Required when calling `vouch.escrow.confirm()`.
+</ParamField>
+
+<ParamField body="externalUserId" type="string" required>
+  Your internal identifier for the user performing the action (buyer or seller). Vouch uses this to record which party has confirmed a milestone.
+</ParamField>
+
+<ParamField body="currency" type="string">
+  Three-letter ISO 4217 currency code. Defaults to `NGN` if not specified. Set this at agreement creation — it cannot be changed afterwards.
+</ParamField>

@@ -1,0 +1,145 @@
+---
+title: "Verifying User Identity with the Vouch SDK"
+sidebarTitle: "Identity"
+description: "Verify user identity via an iframe modal or programmatic document upload, with liveness detection and document match scoring."
+---
+
+The identity module gives you two ways to verify that a real person controls the account they claim to own. The first method launches a hosted iframe modal that guides the user through capture — no custom UI required. The second method accepts files you have already collected, giving you full control over the capture experience. Both methods return the same result shape, so you can switch between them without changing downstream logic.
+
+## Method 1: `vouch.identity.verify(externalUserId)`
+
+This method injects a hosted iframe modal into the current browser page. The modal walks the user through document capture and selfie liveness steps, then resolves the returned Promise once verification is complete. It is the recommended approach for browser-based applications because it requires no additional UI work on your side.
+
+<ParamField path="externalUserId" type="string" required>
+  Your platform's unique identifier for the user being verified. Vouch stores the result against this ID so you can retrieve it later.
+</ParamField>
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch('your-api-key');
+
+async function verifyUser(userId: string) {
+  try {
+    const result = await vouch.identity.verify(userId);
+
+    if (result.data.identityVerified) {
+      console.log('Identity confirmed ✓', result.data.id);
+    } else {
+      console.warn('Verification failed:', result.message);
+    }
+  } catch (err) {
+    console.error('Verification error:', err);
+  }
+}
+```
+
+<Note>
+  `vouch.identity.verify()` is a browser-only method. Calling it in a Node.js or server-side environment will throw because there is no DOM to inject the modal into.
+</Note>
+
+---
+
+## Method 2: `vouch.identity.submitVerification(documentFile, selfieFrames, externalUserId)`
+
+This method uploads a document image and an array of selfie frames directly to the Vouch API. Use it when your application already has its own camera or file-capture UI and you want to handle the user experience yourself.
+
+<ParamField path="documentFile" type="File | Blob" required>
+  A JPEG or PNG image of the user's identity document. Maximum file size is 5 MB.
+</ParamField>
+
+<ParamField path="selfieFrames" type="(File | Blob)[]" required>
+  An array of JPEG or PNG selfie frames captured from the user's camera. Provide between 3 and 15 frames for the best liveness detection accuracy.
+</ParamField>
+
+<ParamField path="externalUserId" type="string" required>
+  Your platform's unique identifier for the user. Same semantics as `verify()`.
+</ParamField>
+
+<Note>
+  Provide **3–15 selfie frames** for reliable liveness results. A single frame is accepted but significantly reduces detection confidence. Each individual file must be JPEG or PNG and must not exceed 5 MB.
+</Note>
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch('your-api-key');
+
+async function handleVerificationSubmit(
+  docInput: HTMLInputElement,
+  selfieInput: HTMLInputElement,
+  userId: string
+) {
+  const documentFile = docInput.files?.[0];
+  const selfieFiles = Array.from(selfieInput.files ?? []);
+
+  if (!documentFile || selfieFiles.length === 0) {
+    throw new Error('Document and at least one selfie frame are required.');
+  }
+
+  const result = await vouch.identity.submitVerification(
+    documentFile,
+    selfieFiles,
+    userId
+  );
+
+  if (result.data.identityVerified) {
+    console.log('Match score:', result.data.identityMatchScore);
+    console.log('Document type:', result.data.documentType);
+  } else {
+    console.warn('Verification failed:', result.message);
+  }
+}
+```
+
+<Warning>
+  Only JPEG and PNG files are accepted. Submitting a PDF, HEIC, or other format will cause the request to fail. Convert files on the client before calling `submitVerification`.
+</Warning>
+
+---
+
+## Response fields
+
+Both methods resolve with an `IdentityVerifyResult` object.
+
+<ResponseField name="status" type="string">
+  Top-level outcome of the verification request. Either `"success"` or `"failed"`.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  A human-readable description of the outcome, useful for logging or displaying error details to your support team.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The structured verification payload.
+
+  <Expandable title="data fields">
+    <ResponseField name="data.id" type="string">
+      The Vouch-assigned unique identifier for this verification record.
+    </ResponseField>
+
+    <ResponseField name="data.externalUserId" type="string">
+      The user ID you passed in, echoed back for correlation.
+    </ResponseField>
+
+    <ResponseField name="data.identityVerified" type="boolean">
+      `true` if the document and selfie matched successfully and liveness passed. Use this as your primary decision field.
+    </ResponseField>
+
+    <ResponseField name="data.identityMatchScore" type="number | null">
+      A numeric score from 0 to 99 representing how closely the selfie matches the document photo. A higher score means a stronger match. Returns `null` when the comparison could not be completed.
+    </ResponseField>
+
+    <ResponseField name="data.livenessPassed" type="boolean">
+      `true` if the anti-spoofing liveness check determined a real person was present during capture.
+    </ResponseField>
+
+    <ResponseField name="data.documentType" type="string | null">
+      The detected document category. One of `"passport"`, `"drivers_license"`, or `"national_id"`. Returns `null` if the document type could not be determined.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Tip>
+  Gate sensitive user actions on both `identityVerified: true` **and** `livenessPassed: true`. A high match score alone does not confirm that a live person — rather than a photograph — was presented.
+</Tip>

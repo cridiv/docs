@@ -1,0 +1,90 @@
+---
+title: "Provision a Developer Account — Vouch API"
+sidebarTitle: "Provision Account"
+description: "Create a new Vouch developer account with an email and password. This is the first step to accessing the API and generating authentication keys."
+---
+
+Provisioning a developer account is the starting point for integrating Vouch into your platform. This is a public endpoint — no API key is required — and it takes just an email address and a password to get you set up. Once your account is created, visit the Vouch dashboard or call the [Generate API Key](/api/developer/api-keys) endpoint to obtain the credentials you need to authenticate all subsequent API requests.
+
+## Endpoint
+
+```
+POST /v1/developer/provision
+```
+
+This endpoint is **public** and does not require an `x-api-key` header.
+
+## Request
+
+### Body Parameters
+
+<ParamField body="email" type="string" required>
+  The email address to associate with your developer account. This must be a valid email address and will be used for account recovery and notifications.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  A password to secure your developer account. Choose a strong password — a minimum of 8 characters including a mix of letters, numbers, and symbols is recommended.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://vouch-fmql.onrender.com/v1/developer/provision \
+  --header "Content-Type: application/json" \
+  --data '{
+    "email": "dev@example.com",
+    "password": "your-password"
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch(
+  "https://vouch-fmql.onrender.com/v1/developer/provision",
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: "dev@example.com",
+      password: "your-password",
+    }),
+  }
+);
+
+const developer = await response.json();
+console.log(developer.id); // "dev_abc123"
+```
+
+</CodeGroup>
+
+## Response
+
+A successful request returns HTTP `201 Created` with your new developer account details.
+
+<ResponseField name="id" type="string">
+  Vouch's unique identifier for your developer account, prefixed with `dev_`. Keep this on hand — it appears in agreement objects and audit logs.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The email address associated with the account, echoed back for confirmation.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  A human-readable status message confirming the account was created and pointing you to your next step.
+</ResponseField>
+
+<Note>
+  After provisioning, your account does not automatically include an API key. Visit the **Vouch dashboard** or call [POST /v1/developer/api-keys](/api/developer/api-keys) to generate your first key. You'll need that key to authenticate every subsequent request.
+</Note>
+
+### Example Response
+
+```json
+{
+  "id": "dev_abc123",
+  "email": "dev@example.com",
+  "message": "Developer account provisioned. Check the dashboard for your API key."
+}
+```

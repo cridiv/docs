@@ -1,0 +1,117 @@
+---
+title: "Identity Verification: Documents, Biometrics & Liveness"
+sidebarTitle: "Identity"
+description: "Understand how Vouch verifies real-world identity using OCR document parsing, ArcFace face matching, and multi-frame liveness detection."
+---
+
+Identity verification confirms that a user is who they claim to be by cross-referencing a government-issued document with a live biometric selfie. Vouch runs the submitted materials through an automated AI pipeline that extracts the portrait from the document, matches it against the selfie using ArcFace, and validates liveness through multi-frame video analysis. The result is a single `identityVerified` boolean backed by a transparent match score — no black-box decisions.
+
+## Integration modes
+
+Vouch offers two ways to trigger identity verification. Choose the one that fits your integration context.
+
+<CardGroup cols={2}>
+  <Card title="Iframe modal (recommended)" icon="window">
+    Call `vouch.identity.verify(externalUserId)` from the browser. Vouch launches a zero-click iframe that guides your user through document capture and selfie recording entirely within the modal. You receive the result via a callback — no file handling on your side.
+  </Card>
+  <Card title="Programmatic upload" icon="upload">
+    Call `vouch.identity.submitVerification(documentFile, selfieFrames[], externalUserId)` to send a multipart request directly from your server or a custom UI. Use this mode when you need full control over the capture experience or are operating in a non-browser environment.
+  </Card>
+</CardGroup>
+
+<Tip>
+  Use the iframe modal whenever possible. It handles camera permissions, frame sampling, and file compression automatically, reducing the risk of submission errors that cause avoidable rejections.
+</Tip>
+
+## The verification pipeline
+
+Every submission — regardless of integration mode — passes through the same five-stage AI pipeline before a result is returned.
+
+<Steps>
+  <Step title="Document upload">
+    The document image is received as a multipart upload or captured directly inside the iframe modal. Vouch validates the file format and image quality before proceeding.
+  </Step>
+  <Step title="OCR parsing">
+    Optical character recognition extracts structured data from the document — name, date of birth, document number, expiry date, and issuing authority — and checks for signs of tampering or low-quality scans.
+  </Step>
+  <Step title="Face extraction">
+    The portrait embedded in the document is isolated and normalised. If no face is detected or the portrait region is obscured, the pipeline returns a `face_not_found` rejection.
+  </Step>
+  <Step title="ArcFace biometric matching">
+    The extracted document portrait is compared against the selfie image using the ArcFace deep learning model. The comparison produces an `identityMatchScore` between 0 and 99. A score of 90 or above is required for a positive match.
+  </Step>
+  <Step title="Liveness detection">
+    Multiple selfie frames captured during the session are analysed to confirm the user is physically present. Static photos, printed images, and screen replays are rejected. Passing this check sets `livenessPassed: true`.
+  </Step>
+</Steps>
+
+## Match score interpretation
+
+The `identityMatchScore` returned in the response tells you exactly how closely the selfie matched the document portrait. Use the table below to understand what each range means.
+
+| Score | Verdict | `identityVerified` |
+|-------|---------|-------------------|
+| 90–99 | Strong match | `true` |
+| 50–89 | Uncertain — possible match | `false` |
+| 0–49  | Mismatch — faces do not correspond | `false` |
+
+<Note>
+  Only a score of 90 or above sets `identityVerified: true`. Scores in the 50–89 range indicate the pipeline detected faces in both images but could not reach the confidence threshold — this often happens with low-resolution document portraits or inconsistent lighting conditions.
+</Note>
+
+## Supported document types
+
+Pass one of the following values as the `documentType` parameter when using the programmatic upload mode. The iframe modal detects the document type automatically.
+
+| Value | Document |
+|-------|----------|
+| `passport` | International passport (any country) |
+| `drivers_license` | Government-issued driver's licence |
+| `national_id` | National identity card |
+| `voters_card` | Voter registration card |
+
+## Response fields
+
+<ResponseField name="identityVerified" type="boolean">
+  `true` when the ArcFace match score is ≥ 90 **and** liveness detection passed. `false` in all other cases.
+</ResponseField>
+
+<ResponseField name="identityMatchScore" type="number">
+  Integer between 0 and 99 representing the biometric similarity between the selfie and the document portrait. Higher is a closer match.
+</ResponseField>
+
+<ResponseField name="livenessPassed" type="boolean">
+  `true` when the multi-frame analysis confirms a real, present person. `false` if the liveness check detects a replay, printed photo, or insufficient frame quality.
+</ResponseField>
+
+<ResponseField name="documentType" type="string">
+  The document type detected or submitted. One of `passport`, `drivers_license`, `national_id`, or `voters_card`.
+</ResponseField>
+
+## What `livenessPassed` means
+
+Liveness detection analyses multiple frames captured during the selfie stage rather than a single photograph. This guards against presentation attacks — attempts to pass verification by holding up a photo of someone else, playing a video on a screen, or using a deepfake. The multi-frame approach detects micro-movements, natural blinking, and depth cues that a static image cannot replicate. If the captured frames do not meet the minimum quality or motion threshold, the pipeline marks `livenessPassed: false` and the overall verification fails regardless of the match score.
+
+## Rejection reasons
+
+When a verification attempt fails, the response includes a rejection reason. Use this value to provide actionable feedback to your user.
+
+<Accordion title="face_not_found">
+  No face was detected in either the document portrait region or the selfie frames. Ask the user to retake the selfie in good lighting and ensure the document is fully visible with no glare.
+</Accordion>
+
+<Accordion title="liveness_failed">
+  The multi-frame analysis determined the selfie was not captured from a live person. Ask the user to complete the verification in a well-lit environment, looking directly at the camera, without using a pre-recorded video.
+</Accordion>
+
+<Accordion title="match_below_threshold">
+  A face was found in both images but the ArcFace similarity score fell below 90. This can happen if the document photo is significantly older than the user's current appearance, or if image quality is poor. Ask the user to retake the selfie with better lighting or submit a different document.
+</Accordion>
+
+<Accordion title="document_unreadable">
+  The OCR pipeline could not extract reliable data from the document image. This is usually caused by glare, blurring, a partially cropped document, or an unsupported document type. Ask the user to photograph the document on a flat, dark surface with the camera held perpendicular to the page.
+</Accordion>
+
+<Tip>
+  Verified identity data is stored on the user's Vouch profile and referenced automatically in subsequent fraud assessments. A user with `identityVerified: true` will not trigger the `identity_not_verified` fraud signal, which lowers their baseline fraud score on every future transaction.
+</Tip>

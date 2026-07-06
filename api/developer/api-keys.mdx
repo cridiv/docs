@@ -1,0 +1,105 @@
+---
+title: "Generate an API Key — Vouch API"
+sidebarTitle: "API Keys"
+description: "Generate a new API key for your developer account. The full key is shown only once — store it securely in your environment variables before leaving the page."
+---
+
+API keys are the credentials that authenticate every request you make to the Vouch API. You generate them programmatically via this endpoint (or through the Vouch dashboard) after provisioning your developer account. Vouch returns the full key exactly once in the response — it is never retrievable again in plain text after that. Store it immediately in a secure location such as an environment variable or a secrets manager.
+
+## Endpoint
+
+```
+POST /v1/developer/api-keys
+```
+
+## Request
+
+### Headers
+
+<ParamField header="x-api-key" type="string" required>
+  A valid Vouch API key. You must already have at least one key (from the dashboard) to generate additional keys via the API.
+</ParamField>
+
+### Body Parameters
+
+This endpoint accepts an empty JSON body (`{}`). No parameters are required. You may optionally include metadata fields if your integration requires key labelling — contact Vouch support for details on extended metadata.
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://vouch-fmql.onrender.com/v1/developer/api-keys \
+  --header "Content-Type: application/json" \
+  --header "x-api-key: <YOUR_EXISTING_API_KEY>" \
+  --data '{}'
+```
+
+```typescript TypeScript
+const response = await fetch(
+  "https://vouch-fmql.onrender.com/v1/developer/api-keys",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.VOUCH_API_KEY!,
+    },
+    body: JSON.stringify({}),
+  }
+);
+
+const { apiKey, prefix, createdAt } = await response.json();
+
+// Store apiKey immediately — it will not be shown again
+console.log("New API key:", apiKey);
+console.log("Key prefix (safe to log):", prefix);
+```
+
+</CodeGroup>
+
+## Response
+
+A successful request returns HTTP `201 Created` with the newly generated key.
+
+<ResponseField name="apiKey" type="string">
+  The full API key in the format `vouch_live_<random>`. This value is shown **once only** — copy it to your environment before discarding the response.
+</ResponseField>
+
+<ResponseField name="prefix" type="string">
+  The non-secret prefix of the key (e.g. `vouch_live_8f9a2b3c`). You can safely log or display this to help identify which key is in use without exposing the secret.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the key was generated.
+</ResponseField>
+
+<Warning>
+  **The full API key is shown exactly once.** After this response is returned, Vouch stores only a hashed version and cannot recover the original value. If you lose the key, you will need to generate a new one and rotate it across your services. Copy the key into your secrets store before closing or discarding this response.
+</Warning>
+
+### Example Response
+
+```json
+{
+  "apiKey": "vouch_live_8f9a2b3c4d5e6f7a...",
+  "prefix": "vouch_live_8f9a2b3c",
+  "createdAt": "2026-07-01T12:00:00.000Z"
+}
+```
+
+## Best Practices
+
+Follow these guidelines to keep your API keys and your users' data safe.
+
+**Use environment variables.** Never hard-code an API key in your source files. Store it in an environment variable named `VOUCH_API_KEY` and reference it at runtime:
+
+```bash
+export VOUCH_API_KEY="vouch_live_8f9a2b3c4d5e6f7a..."
+```
+
+**Never commit keys to version control.** Add `.env` files to your `.gitignore`. Use a secrets manager (e.g. AWS Secrets Manager, HashiCorp Vault, or your CI/CD platform's secret store) in production environments.
+
+**Rotate keys regularly.** Generate a new key and deprecate the old one on a schedule that fits your security policy. Use the `prefix` field to identify which key is active in your logs without exposing the secret portion.
+
+**Use one key per environment.** Maintain separate keys for development, staging, and production so that a compromised key in one environment cannot affect others.

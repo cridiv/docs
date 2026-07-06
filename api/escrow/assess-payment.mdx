@@ -1,0 +1,157 @@
+---
+title: "Assess Payment Risk for an Agreement — Vouch API"
+sidebarTitle: "Assess Payment"
+description: "Run a fraud and risk check on a funding attempt before releasing a virtual bank account number for buyer payment into escrow."
+---
+
+Before a buyer funds an escrow agreement, you should run a payment risk assessment. This endpoint analyses the buyer's transaction context — including device fingerprint and network signals — and returns a risk score alongside a colour-coded flag: `GREEN`, `AMBER`, or `RED`. When the flag is `GREEN` or `AMBER`, Vouch also returns the virtual bank account details the buyer should transfer funds to. If the flag is `RED`, the transaction should be blocked and no virtual account is provided.
+
+## Endpoint
+
+```
+POST /v1/escrow/agreements/:id/assess
+```
+
+## Request
+
+### Headers
+
+<ParamField header="x-api-key" type="string" required>
+  Your Vouch API key.
+</ParamField>
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique ID of the escrow agreement to assess. This is the `id` returned when you created the agreement (e.g. `agr_clx8f7k2z000108l4`).
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="external_user_id" type="string" required>
+  The buyer's external ID as stored in your platform. Must match the `buyerExternalId` used when creating the agreement.
+</ParamField>
+
+<ParamField body="transaction_amount" type="number" required>
+  The amount the buyer intends to transfer, in the smallest currency unit (kobo for NGN). Should match the agreement's `totalAmount` or a partial funding amount.
+</ParamField>
+
+<ParamField body="device_fingerprint" type="string">
+  An opaque string uniquely identifying the buyer's device. Providing this improves the accuracy of the risk score. Can be generated client-side using a fingerprinting library.
+</ParamField>
+
+<ParamField body="simulate_vpn" type="boolean" default="false">
+  When set to `true`, the assessment engine treats the request as if it originated from a VPN. Useful for testing your integration's RED-flag handling in non-production environments.
+</ParamField>
+
+<ParamField body="simulate_impossible_travel" type="boolean" default="false">
+  When set to `true`, the assessment engine simulates an impossible-travel signal. Useful for testing your integration in non-production environments.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://vouch-fmql.onrender.com/v1/escrow/agreements/agr_clx8f7k2z000108l4/assess \
+  --header "Content-Type: application/json" \
+  --header "x-api-key: <YOUR_API_KEY>" \
+  --data '{
+    "external_user_id": "client_buyer_123",
+    "transaction_amount": 500000,
+    "device_fingerprint": "abc123xyz",
+    "simulate_vpn": false,
+    "simulate_impossible_travel": false
+  }'
+```
+
+```typescript TypeScript
+import Vouch from "@vouch/sdk";
+
+const vouch = new Vouch({ apiKey: process.env.VOUCH_API_KEY });
+
+const assessment = await vouch.escrow.assess("agr_clx8f7k2z000108l4", {
+  external_user_id: "client_buyer_123",
+  transaction_amount: 500000,
+  device_fingerprint: "abc123xyz",
+});
+
+if (assessment.flag === "RED") {
+  // Block the transaction on your frontend
+  throw new Error(assessment.recommendation);
+}
+
+// Present virtual account details to the buyer
+console.log(assessment.virtualAccount?.accountNumber);
+```
+
+</CodeGroup>
+
+## Response
+
+<ResponseField name="score" type="number">
+  A numeric risk score from `0` (lowest risk) to `100` (highest risk). Scores below roughly 30 yield `GREEN`, above 70 yield `RED`, and values in between yield `AMBER`.
+</ResponseField>
+
+<ResponseField name="flag" type="string">
+  The overall risk verdict. One of:
+  - `GREEN` — transaction is low-risk; virtual account is provided.
+  - `AMBER` — elevated risk; virtual account is provided but you may want to apply additional checks.
+  - `RED` — high risk; no virtual account is returned and the transaction should be blocked.
+</ResponseField>
+
+<ResponseField name="virtualAccount" type="object">
+  The virtual bank account the buyer should transfer funds to. Only present when `flag` is `GREEN` or `AMBER`.
+
+  <Expandable title="virtualAccount fields">
+    <ResponseField name="accountNumber" type="string">
+      The 10-digit virtual account number generated for this agreement.
+    </ResponseField>
+
+    <ResponseField name="bankCode" type="string">
+      The bank routing code for the virtual account provider.
+    </ResponseField>
+
+    <ResponseField name="accountName" type="string">
+      The display name on the account, typically `"Vouch Escrow — <buyerName>"`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="triggeredSignals" type="array">
+  A list of signal identifiers that contributed to a high risk score. Only present on `AMBER` and `RED` responses. Example values: `"vpn_detected"`, `"impossible_travel"`, `"device_mismatch"`.
+</ResponseField>
+
+<ResponseField name="recommendation" type="string">
+  A human-readable action recommendation. Only present on `RED` responses, e.g. `"Block this transaction."`.
+</ResponseField>
+
+<Warning>
+  The `virtualAccount` object is **only returned when the flag is `GREEN` or `AMBER`**. If the flag is `RED`, no virtual account is included in the response and you must not proceed with the payment. Always check the `flag` field before presenting account details to the buyer.
+</Warning>
+
+### Example Response — GREEN
+
+```json
+{
+  "score": 15,
+  "flag": "GREEN",
+  "virtualAccount": {
+    "accountNumber": "9988771122",
+    "bankCode": "000017",
+    "accountName": "Vouch Escrow — Acme Holdings"
+  }
+}
+```
+
+### Example Response — RED
+
+```json
+{
+  "score": 87,
+  "flag": "RED",
+  "triggeredSignals": ["vpn_detected"],
+  "recommendation": "Block this transaction."
+}
+```

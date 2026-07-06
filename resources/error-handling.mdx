@@ -1,0 +1,185 @@
+---
+title: "Error Handling in the Vouch SDK"
+sidebarTitle: "Error Handling"
+description: "Learn how to handle HTTP errors, identity rejection reasons, and fraud engine edge cases when integrating the Vouch SDK into your application."
+---
+
+All Vouch SDK methods return Promises and throw errors as Axios errors when something goes wrong. This means you can use standard `try/catch` blocks to handle failures, inspect the HTTP status code, and surface meaningful messages to your users. Understanding the error surface helps you build resilient integrations that degrade gracefully under failure conditions.
+
+## Standard Error Handling Pattern
+
+Wrap every SDK call in a `try/catch` block. Axios errors expose three distinct shapes depending on where the failure occurred: a server response, a network-level failure, or an unexpected client-side error.
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch({ apiKey: 'your_api_key' });
+
+try {
+  const agreement = await vouch.escrow.status('invalid_id');
+} catch (error: any) {
+  if (error.response) {
+    // The server responded with a non-2xx status code
+    const status: number = error.response.status;
+    const message: string = error.response.data?.message ?? 'Unknown server error';
+    console.error(`HTTP ${status}: ${message}`);
+  } else if (error.request) {
+    // The request was sent but no response was received
+    console.error('Network error — check your internet connection');
+  } else {
+    // Something went wrong setting up the request
+    console.error('Unexpected error:', error.message);
+  }
+}
+```
+
+## HTTP Error Reference
+
+The table below lists every HTTP status code the Vouch API returns, its cause, and the recommended resolution.
+
+| Code | Cause | Resolution |
+|------|-------|------------|
+| `400` | Bad Request — missing required fields or invalid file format | Check all required parameters are present; ensure images are JPEG or PNG and under 5 MB |
+| `401` | Unauthorized — invalid or missing API key | Verify your `x-api-key` value is correct and has not expired |
+| `404` | Not Found — agreement ID, milestone ID, or other resource does not exist | Double-check the ID you are passing matches a resource you created |
+| `409` | Conflict — duplicate action (e.g., milestone already confirmed) | Check the current resource state before performing write operations |
+| `413` | Payload Too Large — uploaded file exceeds 5 MB | Compress or resize the image before uploading |
+| `500` | Internal Server Error | Retry with exponential backoff; contact support if the error persists |
+| `503` | Service Unavailable | Wait briefly, then retry; check the Vouch status page for outages |
+
+## Identity Verification Errors
+
+When an identity check fails, the verification result will have `identityVerified: false` along with a `rejection_reason` field that tells you exactly why the check did not pass. Inspect this field to present actionable feedback to your user rather than a generic failure message.
+
+```typescript
+const result = await vouch.identity.verify({
+  documentImage: documentBase64,
+  selfieImage: selfieBase64,
+});
+
+if (!result.data.identityVerified) {
+  const reason = result.data.rejection_reason;
+
+  switch (reason) {
+    case 'face_not_found':
+      // No face was detected in the selfie or document photo
+      console.warn('No face detected. Ask the user to retake the photo in good lighting.');
+      break;
+
+    case 'liveness_failed':
+      // The liveness check determined the selfie may not be a live person
+      console.warn('Liveness check failed. Ask the user to use the live camera capture.');
+      break;
+
+    case 'match_below_threshold':
+      // Face similarity score fell below the 90% ArcFace threshold
+      console.warn('Face match too low. Ensure the selfie clearly shows the user\'s face.');
+      break;
+
+    case 'document_unreadable':
+      // Reducto AI could not extract fields from the document image
+      console.warn('Document unreadable. Ask the user to upload a clearer, unobstructed photo.');
+      break;
+
+    default:
+      console.warn(`Verification failed: ${reason}`);
+  }
+}
+```
+
+<Note>
+Identity verification errors are **not** HTTP errors — the API returns a `200` response with `identityVerified: false`. Check the `rejection_reason` field, not the HTTP status code, to understand why a verification failed.
+</Note>
+
+## Fraud Assessment Behavior
+
+When the Vouch fraud engine encounters an internal error during scoring, it deliberately defaults to an **AMBER** flag rather than PASS. This fail-safe means the engine **never auto-approves** a transaction when it cannot complete a full assessment. Your integration should treat AMBER as requiring human review, not as a soft pass.
+
+```typescript
+const fraudResult = await vouch.fraud.assess({
+  userId: 'user_123',
+  transactionData: { amount: 50000, currency: 'NGN' },
+});
+
+switch (fraudResult.data.flag) {
+  case 'GREEN':
+    // Clean signal — proceed normally
+    break;
+
+  case 'AMBER':
+    // Engine error OR borderline signals — requires human review
+    if (fraudResult.data.engineError) {
+      console.warn('Fraud engine encountered an error. Defaulting to manual review.');
+    }
+    // Route to your review queue regardless of the cause
+    triggerManualReview(fraudResult);
+    break;
+
+  case 'RED':
+    // Clear fraud signals detected — block the transaction
+    blockTransaction(fraudResult);
+    break;
+}
+```
+
+<Warning>
+Never treat an AMBER result as an implicit approval. When the fraud engine errors, it returns AMBER as a conservative default. Always route AMBER results to a human reviewer or hold queue.
+</Warning>
+
+## Retry Strategy
+
+Apply different retry strategies depending on the error class. Retrying a `4xx` error is almost always wrong — the request itself is malformed, so sending it again will produce the same failure.
+
+- **5xx errors** — the server failed; retry with exponential backoff
+- **4xx errors** — the client sent a bad request; fix the request before resending
+- **Network errors** — retry with backoff; the server may not have received the request
+
+The following utility wraps any async SDK call with configurable retries and exponential backoff:
+
+```typescript
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  baseDelayMs = 500,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+
+      const status: number | undefined = error.response?.status;
+
+      // Never retry client errors — fix the request instead
+      if (status !== undefined && status >= 400 && status < 500) {
+        throw error;
+      }
+
+      if (attempt < maxAttempts) {
+        const delay = baseDelayMs * 2 ** (attempt - 1); // 500ms, 1000ms, 2000ms …
+        console.warn(`Attempt ${attempt} failed (${status ?? 'network'}). Retrying in ${delay}ms…`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+// Usage
+const agreement = await withRetry(() => vouch.escrow.status(agreementId));
+```
+
+<Accordion title="What if the server returns 503 during a critical escrow operation?">
+A `503 Service Unavailable` response means Vouch's infrastructure is temporarily unable to handle your request. Use exponential backoff and retry up to three times. If the error persists beyond your retry budget, surface a user-friendly message and check the Vouch status page. Avoid retrying indefinitely — use a maximum attempt cap and alert your team if the threshold is exceeded.
+</Accordion>
+
+<Accordion title="Should I retry identity verification on failure?">
+Only retry on network errors or `5xx` responses. If the identity check returned `identityVerified: false` with a `rejection_reason`, retrying the same images will produce the same result. Prompt the user to retake their photo or document scan based on the specific rejection reason before submitting again.
+</Accordion>
+
+<Tip>
+Log the triggered signals from fraud assessments (available in `fraudResult.data.signals`) alongside the flag value. These signal arrays are invaluable for debugging false positives and tuning your review workflows over time.
+</Tip>

@@ -1,0 +1,165 @@
+---
+title: "Verify User Identity with Document and Selfie"
+sidebarTitle: "POST /identity/verify"
+description: "Submit a government ID and selfie frames to verify a user's identity. Returns a match score, liveness result, and verified status."
+---
+
+The identity verification endpoint analyzes a user's government-issued document alongside one or more selfie frames to confirm that the person submitting the document is its legitimate holder. Vouch's AI engine compares facial geometry, checks liveness signals, and returns a match score alongside a binary `identityVerified` result. An `identityMatchScore` of 90 or above is required for the verification to pass.
+
+```
+POST https://vouch-fmql.onrender.com/v1/identity/verify
+```
+
+## Request
+
+**Content-Type:** `multipart/form-data`  
+**Auth:** `x-api-key: <your-key>`
+
+<ParamField body="external_user_id" type="string" required>
+  Your platform's unique identifier for the user being verified. This value is stored and returned in the response as `externalUserId` so you can correlate results with your own records.
+</ParamField>
+
+<ParamField body="document_image" type="file" required>
+  A JPEG or PNG image of the user's government-issued ID. Maximum file size is 5 MB. Accepted document types are `passport`, `drivers_license`, `national_id`, and `voters_card`. Ensure the image is well-lit and all four corners of the document are visible.
+</ParamField>
+
+<ParamField body="selfie_images[]" type="file[]" required>
+  One or more JPEG or PNG selfie frames of the user's face, each up to 5 MB. Providing multiple frames from a short video improves liveness detection accuracy. At least one frame must be supplied.
+</ParamField>
+
+<ParamField body="device_fingerprint" type="string">
+  A browser or device fingerprint string collected from the user's session. When you use the Vouch browser SDK, this value is captured and attached automatically. Pass it manually here if you are calling the REST API directly.
+</ParamField>
+
+## Example Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://vouch-fmql.onrender.com/v1/identity/verify \
+  -H "x-api-key: <your-key>" \
+  -F "external_user_id=user-abc-123" \
+  -F "document_image=@/path/to/id-document.jpg" \
+  -F "selfie_images[]=@/path/to/selfie-frame-1.jpg" \
+  -F "selfie_images[]=@/path/to/selfie-frame-2.jpg" \
+  -F "device_fingerprint=abc123def456"
+```
+
+```typescript TypeScript SDK
+import { VouchClient } from "@vouch/sdk";
+
+const vouch = new VouchClient({ apiKey: process.env.VOUCH_API_KEY });
+
+const docFile = fs.readFileSync("./id-document.jpg");
+const selfieFrame = fs.readFileSync("./selfie-frame-1.jpg");
+
+const result = await vouch.identity.submitVerification(
+  docFile,
+  [selfieFrame],
+  "user-abc-123"
+);
+
+console.log(result.data.identityVerified);  // true | false
+console.log(result.data.identityMatchScore); // 0-99
+```
+
+</CodeGroup>
+
+## Response
+
+<ResponseField name="status" type="string">
+  Indicates the outcome of the verification attempt. Returns `"success"` when processing completed normally and the user passed, or `"failed"` when the AI engine could not confirm the user's identity.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  A human-readable description of the result, such as `"Identity verified successfully"` or `"Identity verification failed"`.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Contains the full verification result for the user.
+
+  <Expandable title="data fields">
+
+    <ResponseField name="id" type="string">
+      Vouch's internal ID for this verification record, e.g. `"usr_1715698234567"`.
+    </ResponseField>
+
+    <ResponseField name="externalUserId" type="string">
+      The `external_user_id` value you submitted, echoed back for correlation.
+    </ResponseField>
+
+    <ResponseField name="identityVerified" type="boolean">
+      `true` if the match score is 90 or above and liveness passed; `false` otherwise.
+    </ResponseField>
+
+    <ResponseField name="identityMatchScore" type="number">
+      An integer from 0 to 99 representing how closely the selfie matches the document photo. A score of 90 or above is required to set `identityVerified` to `true`.
+    </ResponseField>
+
+    <ResponseField name="livenessPassed" type="boolean">
+      `true` if Vouch's liveness analysis determined the selfie frames represent a real, live person rather than a photo or replay attack.
+    </ResponseField>
+
+    <ResponseField name="documentType" type="string">
+      The document type detected from the submitted image. One of `passport`, `drivers_license`, `national_id`, or `voters_card`.
+    </ResponseField>
+
+  </Expandable>
+</ResponseField>
+
+### Success Response
+
+```json
+{
+  "status": "success",
+  "message": "Identity verified successfully",
+  "data": {
+    "id": "usr_1715698234567",
+    "externalUserId": "user-abc-123",
+    "identityVerified": true,
+    "identityMatchScore": 94,
+    "livenessPassed": true,
+    "documentType": "drivers_license"
+  }
+}
+```
+
+### Failed Response
+
+```json
+{
+  "status": "failed",
+  "message": "Identity verification failed",
+  "data": {
+    "id": "usr_1715698234567",
+    "externalUserId": "user-abc-123",
+    "identityVerified": false,
+    "identityMatchScore": 42,
+    "livenessPassed": false,
+    "documentType": "nin"
+  }
+}
+```
+
+## Match Score Reference
+
+| Score Range | Meaning         | `identityVerified` |
+|-------------|-----------------|---------------------|
+| 90 – 99     | Strong match    | `true`              |
+| 50 – 89     | Uncertain match | `false`             |
+| 0 – 49      | Mismatch        | `false`             |
+
+## Rejection Reasons
+
+When the AI engine cannot complete or pass verification, it may surface one of the following rejection reasons:
+
+| Reason                   | Description                                                                 |
+|--------------------------|-----------------------------------------------------------------------------|
+| `face_not_found`         | No face was detected in the selfie or document image.                       |
+| `liveness_failed`        | The selfie frames did not pass liveness analysis.                           |
+| `match_below_threshold`  | A face was found but the match score fell below the 90-point threshold.     |
+| `document_unreadable`    | The document image was too blurry, cropped, or low-contrast to be processed.|
+
+<Note>
+  If you are integrating on the frontend, you do not need to manage file uploads yourself. Call `vouch.identity.verify(userId)` to launch Vouch's zero-click modal, which handles camera access, liveness capture, and document scanning in a single guided flow — then calls this endpoint automatically.
+</Note>

@@ -1,0 +1,158 @@
+---
+title: "Implementing a Complete KYC Identity Verification Flow"
+sidebarTitle: "KYC Flow"
+description: "Learn how to integrate identity verification into your app using the Vouch SDK modal or a custom UI, and handle verification results correctly."
+---
+
+Identity verification (KYC) is the process of confirming that a user is who they claim to be. You should verify users before they participate in high-value transactions, onboard onto a marketplace, or access regulated features. Vouch makes this straightforward by providing both a guided modal flow and a lower-level API for building your own verification UI.
+
+<Steps>
+
+  <Step title="Initialize Vouch">
+    Install the SDK and create a client instance. Store your API key in an environment variable — never hard-code it.
+
+    ```bash
+    npm install vouch-sdk
+    ```
+
+    ```typescript
+    import Vouch from 'vouch-sdk';
+
+    const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+    ```
+  </Step>
+
+  <Step title="Option A: Use the Identity Modal">
+    Call `vouch.identity.verify()` with the user's ID from your platform. This opens a guided iframe that walks the user through document capture and a selfie liveness check. The promise resolves once the user completes (or abandons) the flow.
+
+    ```typescript
+    const result = await vouch.identity.verify('user-abc-123');
+
+    if (result.data.identityVerified) {
+      // Grant access or proceed with the transaction
+      console.log('Verification passed:', result.data.documentType);
+    } else {
+      // Show rejection message
+      console.warn('Verification failed:', result.message);
+    }
+    ```
+
+    The modal handles camera permissions, document framing guidance, and liveness detection automatically. Your code only needs to act on the resolved result.
+  </Step>
+
+  <Step title="Option B: Build Your Own UI">
+    If you need full control over the capture experience, use `vouch.identity.submitVerification()` directly. You provide the document image and an array of selfie frames, then process the result yourself.
+
+    ```typescript
+    // Collect document file from an <input type="file"> element
+    const docInput = document.getElementById('doc-input') as HTMLInputElement;
+    const documentFile = docInput.files![0];
+
+    // Collect multiple selfie frames (e.g. from a <video> capture loop)
+    const selfieFrames: Blob[] = await captureSelfieFrames(); // your capture logic
+
+    const result = await vouch.identity.submitVerification(
+      documentFile,
+      selfieFrames,
+      'user-abc-123'
+    );
+    ```
+
+    For best liveness detection accuracy, capture at least three frames taken 300–500 ms apart during normal head movement.
+  </Step>
+
+  <Step title="Handle the Result">
+    The result object contains everything you need to gate access or surface a rejection reason to the user.
+
+    ```typescript
+    const { status, message, data } = result;
+
+    if (data.identityVerified && data.livenessPassed) {
+      // Full verification passed
+      if (data.identityMatchScore !== undefined) {
+        console.log(`Match confidence: ${data.identityMatchScore}/99`);
+      }
+      // Unlock features, update your DB, etc.
+      await markUserVerified(data.externalUserId);
+    } else if (!data.livenessPassed) {
+      showError('Liveness check failed. Please try again in good lighting.');
+    } else {
+      showError(`Verification failed: ${message}`);
+    }
+    ```
+
+    | Field | Type | Description |
+    |---|---|---|
+    | `identityVerified` | `boolean` | `true` only when document + face match |
+    | `identityMatchScore` | `0–99` | Confidence score for the face-to-document match |
+    | `livenessPassed` | `boolean` | Whether the selfie passed the anti-spoofing check |
+    | `documentType` | `string` | Detected document type: `passport`, `drivers_license`, or `national_id` |
+  </Step>
+
+</Steps>
+
+<Note>
+  Calling `vouch.identity.verify()` or `vouch.identity.submitVerification()` for an `externalUserId` that already has a verification record **updates** their profile rather than creating a duplicate. Use this to trigger re-verification after a failed attempt or when a user's document expires.
+</Note>
+
+<Warning>
+  In production, never call the Vouch SDK directly from browser code where the API key would be exposed. Route verification calls through a server-side endpoint or a backend-for-frontend (BFF) layer. Your server holds the key and returns the result to the client.
+</Warning>
+
+## Complete Example: React Component
+
+The following component demonstrates the full modal-based KYC flow in a React application.
+
+```tsx
+import { useState } from 'react';
+import Vouch from 'vouch-sdk';
+
+// Initialise once at module scope (server-side / BFF in production)
+const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+
+interface KYCButtonProps {
+  userId: string;
+  onVerified: () => void;
+}
+
+export function KYCButton({ userId, onVerified }: KYCButtonProps) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'failed'>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleVerify() {
+    setStatus('loading');
+    setErrorMessage(null);
+
+    try {
+      const result = await vouch.identity.verify(userId);
+
+      if (result.data.identityVerified && result.data.livenessPassed) {
+        setStatus('success');
+        onVerified();
+      } else {
+        setStatus('failed');
+        setErrorMessage(result.message || 'Verification could not be completed.');
+      }
+    } catch (err) {
+      setStatus('failed');
+      setErrorMessage('An unexpected error occurred. Please try again.');
+    }
+  }
+
+  return (
+    <div>
+      <button onClick={handleVerify} disabled={status === 'loading'}>
+        {status === 'loading' ? 'Verifying…' : 'Verify Your Identity'}
+      </button>
+
+      {status === 'success' && (
+        <p style={{ color: 'green' }}>✓ Identity verified successfully.</p>
+      )}
+
+      {status === 'failed' && errorMessage && (
+        <p style={{ color: 'red' }}>✗ {errorMessage}</p>
+      )}
+    </div>
+  );
+}
+```

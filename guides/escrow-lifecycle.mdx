@@ -1,0 +1,234 @@
+---
+title: "Managing the Full Milestone-Based Escrow Agreement Lifecycle"
+sidebarTitle: "Escrow Lifecycle"
+description: "Walk through creating a milestone-based escrow agreement, funding it safely, confirming delivery, and handling disbursement from start to finish."
+---
+
+Escrow holds a buyer's funds in trust until both parties confirm that the agreed work has been delivered. Neither party can access the money unilaterally — Vouch releases it only after mutual confirmation. This makes escrow ideal for any marketplace or platform where payment and delivery happen at different times: freelance projects, service agreements, goods purchases, and more.
+
+Consider a concrete example throughout this guide: a client (buyer) hires a freelancer (seller) to build a website. The project is split into two milestones — a design phase and a development phase — each with its own payment. The client funds the escrow upfront; the freelancer gets paid only after both parties confirm each milestone.
+
+<Steps>
+
+  <Step title="Create the Agreement">
+    Call `vouch.escrow.create()` with the buyer and seller's IDs from your platform, the total contract value, and the milestone breakdown. Vouch returns an `AgreementResponse` containing the agreement ID you'll use for all subsequent calls.
+
+    ```typescript
+    import Vouch from 'vouch-sdk';
+
+    const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+
+    const agreement = await vouch.escrow.create({
+      buyerExternalId: 'client-001',       // your platform's user ID for the buyer
+      sellerExternalId: 'freelancer-007',  // your platform's user ID for the seller
+      totalAmount: 500000,                 // amount in the smallest currency unit (kobo, cents, etc.)
+      currency: 'NGN',
+      milestones: [
+        { description: 'Website design mockups', amount: 150000 },
+        { description: 'Full development and deployment', amount: 350000 },
+      ],
+      buyerEmail: 'client@example.com',
+      buyerName: 'Adaeze Okafor',
+    });
+
+    console.log(agreement.id);     // e.g. 'agr_a1b2c3'
+    console.log(agreement.status); // 'PENDING'
+    ```
+
+    Both the buyer and seller are referenced by the IDs you already use on your platform. Vouch does not require you to create separate Vouch user accounts.
+  </Step>
+
+  <Step title="Pre-Funding Fraud Check">
+    Before showing the buyer payment details, run a fraud assessment against the agreement. If the flag is GREEN, Vouch returns a virtual bank account the buyer can transfer funds to. If it is RED, block the funding flow entirely.
+
+    ```typescript
+    const fundingCheck = await vouch.escrow.assess(agreement.id, {
+      externalUserId: 'client-001',
+      transactionAmount: 500000,
+    });
+
+    if (fundingCheck.flag === 'RED') {
+      throw new Error('Funding blocked due to high fraud risk. Contact support.');
+    }
+
+    if (fundingCheck.flag === 'AMBER') {
+      // Require step-up verification before continuing
+      await requireStepUpVerification('client-001');
+      return;
+    }
+
+    // GREEN — safe to display payment details
+    const { virtualAccount } = fundingCheck;
+
+    if (virtualAccount) {
+      displayPaymentInstructions({
+        accountNumber: virtualAccount.accountNumber,
+        bankCode: virtualAccount.bankCode,
+        accountName: virtualAccount.accountName,
+        amount: 500000,
+      });
+    }
+    ```
+
+    <Note>
+      The virtual account is unique to this agreement. Direct the buyer to transfer the exact `totalAmount` to that account number. Vouch detects the incoming transfer and updates the agreement status automatically.
+    </Note>
+  </Step>
+
+  <Step title="Buyer Sends Funds">
+    Once you display the virtual bank account details, the buyer completes the transfer through their bank or payment app — no further SDK call is needed on your part to initiate this step. Vouch monitors the virtual account and updates the agreement status as funds arrive.
+
+    | Status | Meaning |
+    |---|---|
+    | `PENDING` | Agreement created, no funds received yet |
+    | `PARTIAL` | Some funds received, but less than `totalAmount` |
+    | `FUNDED` | Exact `totalAmount` received — escrow is fully funded |
+    | `OVERFUNDED` | More than `totalAmount` received (see [Error Scenarios](#error-scenarios) below) |
+
+    You can notify the seller when the status reaches `FUNDED` so they know work can begin.
+  </Step>
+
+  <Step title="Track Agreement Status">
+    Poll `vouch.escrow.status()` to check on an agreement at any point. Use this to update your UI, trigger notifications, or confirm that funds have arrived before allowing the seller to start work.
+
+    ```typescript
+    const current = await vouch.escrow.status(agreement.id);
+
+    console.log(current.status);     // e.g. 'FUNDED'
+    console.log(current.milestones); // array of milestone objects with their own statuses
+
+    if (current.status === 'FUNDED') {
+      await notifySeller('freelancer-007', 'Funds received — you can begin work.');
+    }
+    ```
+
+    For time-sensitive flows, poll every 30–60 seconds after the buyer initiates the transfer, or use a webhook if your Vouch plan supports it.
+  </Step>
+
+  <Step title="Confirm a Milestone">
+    When the seller delivers a milestone, both the seller and the buyer must call `vouch.escrow.confirm()` with the agreement ID and the milestone ID. Disbursement triggers automatically once both confirmations are received.
+
+    ```typescript
+    // Seller confirms delivery of milestone 1
+    await vouch.escrow.confirm(
+      agreement.id,
+      agreement.milestones[0].id,
+      'freelancer-007'  // seller's externalUserId
+    );
+
+    // Buyer confirms they are satisfied with milestone 1
+    await vouch.escrow.confirm(
+      agreement.id,
+      agreement.milestones[0].id,
+      'client-001'      // buyer's externalUserId
+    );
+    ```
+
+    <Warning>
+      Funds are only released after **both** parties confirm the same milestone. Confirming as only one party puts the milestone in a pending-confirmation state — the agreement stays in `IN_PROGRESS` until the second confirmation arrives.
+    </Warning>
+
+    Repeat this step for each milestone. The agreement moves to `COMPLETED` once all milestones are confirmed.
+  </Step>
+
+  <Step title="Disbursement">
+    After the final milestone receives mutual confirmation, Vouch automatically disburses the corresponding milestone amount to the seller's account. The agreement status moves through `COMPLETED` → `DISBURSED`.
+
+    ```typescript
+    const finalStatus = await vouch.escrow.status(agreement.id);
+
+    if (finalStatus.status === 'DISBURSED') {
+      await notifyBoth(
+        'client-001',
+        'freelancer-007',
+        'Project complete — payment has been released to the freelancer.'
+      );
+    }
+    ```
+
+    No manual disbursement call is required. Vouch handles the payout as soon as the confirmation threshold is met.
+  </Step>
+
+</Steps>
+
+## Error Scenarios
+
+<Note>
+  **OVERFUNDED** — If the buyer transfers more than `totalAmount`, Vouch records the surplus and the agreement continues normally. The excess is tracked separately and can be refunded or applied to a follow-on agreement. Your UI should inform the buyer of the overpayment without blocking the workflow.
+</Note>
+
+<Warning>
+  **FROZEN** — If Vouch's fraud detection flags the agreement with a RED signal at any point during its lifecycle, the agreement is frozen and no funds move. Contact Vouch support with the `agreementId` to initiate a review. Do not attempt to re-create the agreement until the freeze is lifted.
+</Warning>
+
+<Note>
+  **REFUNDED** — If the agreement is cancelled before any milestone is confirmed (e.g. by mutual consent or dispute resolution), Vouch returns the held funds to the buyer and sets the status to `REFUNDED`.
+</Note>
+
+## Complete End-to-End Example
+
+The following shows the full lifecycle in a single async function.
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+
+async function runEscrowLifecycle() {
+  // 1. Create agreement
+  const agreement = await vouch.escrow.create({
+    buyerExternalId: 'client-001',
+    sellerExternalId: 'freelancer-007',
+    totalAmount: 500000,
+    currency: 'NGN',
+    milestones: [
+      { description: 'Website design mockups', amount: 150000 },
+      { description: 'Full development and deployment', amount: 350000 },
+    ],
+    buyerEmail: 'client@example.com',
+    buyerName: 'Adaeze Okafor',
+  });
+  console.log('Agreement created:', agreement.id, '| Status:', agreement.status);
+
+  // 2. Pre-funding fraud check
+  const fundingCheck = await vouch.escrow.assess(agreement.id, {
+    externalUserId: 'client-001',
+    transactionAmount: 500000,
+  });
+
+  if (fundingCheck.flag !== 'GREEN') {
+    throw new Error(`Funding blocked. Flag: ${fundingCheck.flag}`);
+  }
+
+  console.log('Virtual account:', fundingCheck.virtualAccount);
+  // → Show fundingCheck.virtualAccount to the buyer in your UI
+
+  // 3. (Buyer completes bank transfer — external step)
+  // Poll until FUNDED
+  let status = await vouch.escrow.status(agreement.id);
+  while (status.status !== 'FUNDED') {
+    await new Promise(res => setTimeout(res, 30000)); // wait 30 s
+    status = await vouch.escrow.status(agreement.id);
+  }
+  console.log('Agreement funded:', status.status);
+
+  // 4. Confirm milestone 1 — seller side
+  const milestone1Id = agreement.milestones[0].id;
+  await vouch.escrow.confirm(agreement.id, milestone1Id, 'freelancer-007');
+  console.log('Seller confirmed milestone 1');
+
+  // 5. Confirm milestone 1 — buyer side
+  await vouch.escrow.confirm(agreement.id, milestone1Id, 'client-001');
+  console.log('Buyer confirmed milestone 1 — partial disbursement triggered');
+
+  // 6. Confirm milestone 2 — both sides
+  const milestone2Id = agreement.milestones[1].id;
+  await vouch.escrow.confirm(agreement.id, milestone2Id, 'freelancer-007');
+  await vouch.escrow.confirm(agreement.id, milestone2Id, 'client-001');
+  console.log('All milestones confirmed — full disbursement triggered');
+
+  // 7. Final status check
+  const finalStatus = await vouch.escrow.status(agreement.id);
+  console.log('Final status:', finalStatus.status); // 'DISBURSED'
+}
+```

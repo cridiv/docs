@@ -1,13 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
+  "projectType": "sdk-library",
+  "projectName": "Vouch",
+  "projectDescription": "Vouch is a trust infrastructure SDK that provides AI-powered identity verification (KYC), real-time fraud detection, and milestone-based escrow management for gig marketplaces and B2B platforms.",
   "theme": "luma",
-  "name": "Vouch",
-  "colors": {
-    "primary": "#6366F1",
-    "light": "#EEF2FF",
-    "dark": "#3730A3"
-  },
-  "favicon": "/favicon.svg",
+  "primaryColor": "#6366F1",
+  "lightColor": "#EEF2FF",
+  "darkColor": "#3730A3",
   "navigation": {
     "tabs": [
       {
@@ -95,14 +93,32 @@
       }
     ]
   },
-  "navbar": {
-    "primary": {
-      "type": "button",
-      "label": "Get Started",
-      "href": "https://vouch-fmql.onrender.com"
-    }
-  },
-  "footer": {
-    "socials": {}
-  }
+  "keyFeatures": [
+    "AI-powered identity verification using ArcFace biometric matching and multi-frame liveness detection",
+    "Real-time fraud risk scoring (GREEN/AMBER/RED) with hybrid ML + rules engine",
+    "Milestone-based escrow agreements with automated virtual bank account provisioning",
+    "Zero-click iframe verification modal for seamless in-app KYC flows",
+    "Automatic device fingerprinting for fraud context collection",
+    "Developer dashboard with full audit logs and analytics",
+    "TypeScript SDK with full type definitions for Node.js and browser environments"
+  ],
+  "publicApiSurface": [
+    "new Vouch(apiKey, options?)",
+    "vouch.identity.verify(externalUserId)",
+    "vouch.identity.submitVerification(documentFile, selfieFrames, externalUserId)",
+    "vouch.fraud.assess(params: FraudAssessParams)",
+    "vouch.escrow.create(params: CreateAgreementParams)",
+    "vouch.escrow.assess(agreementId, params: AssessPaymentParams)",
+    "vouch.escrow.confirm(agreementId, milestoneId, externalUserId)",
+    "vouch.escrow.status(agreementId)",
+    "getDeviceFingerprint()",
+    "POST /v1/identity/verify",
+    "POST /v1/fraud/assess",
+    "POST /v1/escrow/agreements",
+    "GET /v1/escrow/agreements/:id",
+    "POST /v1/escrow/agreements/:id/assess",
+    "POST /v1/escrow/agreements/:id/milestones/:mid/confirm",
+    "POST /v1/developer/provision",
+    "POST /v1/developer/api-keys"
+  ]
 }

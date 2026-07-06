@@ -1,0 +1,105 @@
+---
+title: "Tracking Escrow Events and Status Changes"
+sidebarTitle: "Webhooks"
+description: "Learn how to track escrow agreement events, poll for status changes, and use the Vouch developer dashboard to monitor your integration in real time."
+---
+
+Vouch is designed around an event-driven escrow lifecycle. As buyers fund agreements, milestones get confirmed, and disbursements complete, the agreement moves through a well-defined set of statuses. Knowing when and how to react to these transitions is central to building a reliable integration. Today, Vouch surfaces these events through two mechanisms: programmatic polling via the SDK and the real-time audit log in the developer dashboard.
+
+## Escrow Status Changes
+
+Two approaches let you track what is happening inside an escrow agreement at any point in its lifecycle.
+
+### 1. Polling with the SDK
+
+Call `vouch.escrow.status(agreementId)` at any time to fetch the current state of an agreement. This is the most straightforward approach and works well for low-frequency checks — for example, after a buyer confirms payment or when a seller marks a milestone as delivered.
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch({ apiKey: 'your_api_key' });
+
+const agreement = await vouch.escrow.status('agr_abc123');
+console.log(agreement.status); // e.g. 'FUNDED'
+```
+
+### 2. Developer Dashboard
+
+The Vouch developer dashboard provides a real-time view of every agreement in your account. Events such as payment receipt, milestone confirmation, fraud detection, and disbursement all appear in the audit log within seconds of occurring. Use the dashboard for monitoring, debugging, and reviewing the full event timeline of any agreement without writing any additional code.
+
+## Polling Helper Example
+
+If your workflow requires waiting for a specific status — for example, waiting for a buyer to fund an agreement before releasing instructions to a seller — you can build a lightweight polling helper around `vouch.escrow.status()`.
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+async function waitForFunding(
+  vouch: Vouch,
+  agreementId: string,
+  maxAttempts = 20,
+): Promise<Awaited<ReturnType<typeof vouch.escrow.status>>> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const agreement = await vouch.escrow.status(agreementId);
+
+    if (['FUNDED', 'OVERFUNDED'].includes(agreement.status)) {
+      return agreement;
+    }
+
+    // Wait 5 seconds before polling again
+    await new Promise(r => setTimeout(r, 5000));
+  }
+
+  throw new Error('Agreement funding timeout');
+}
+
+// Usage
+const fundedAgreement = await waitForFunding(vouch, 'agr_abc123');
+console.log('Funds received — work can begin.');
+```
+
+<Tip>
+Tune the `maxAttempts` and poll interval to match your expected payment window. For bank transfers, a 5-second interval over 20 attempts (100 seconds total) covers most instant payment scenarios. For manual transfers, consider a longer window or a user-triggered re-check.
+</Tip>
+
+## Agreement Events Reference
+
+The table below documents every status an escrow agreement can reach, what it means, and what action your integration should take next.
+
+| Status | Meaning | Next Action |
+|--------|---------|-------------|
+| `PENDING` | Agreement created, awaiting payment | Share the virtual account details with the buyer |
+| `PARTIAL` | Some funds received, amount is below the agreed total | Notify the buyer of the outstanding balance; wait for full payment |
+| `FUNDED` | Full agreed amount received | Notify the seller — work can begin |
+| `OVERFUNDED` | Payment received exceeds the agreed amount | Review the excess with both parties; work proceeds normally |
+| `IN_PROGRESS` | Work has started | Await milestone delivery from the seller |
+| `COMPLETED` | All milestones confirmed by the buyer | Disbursement is being processed |
+| `DISBURSED` | Funds successfully sent to the seller | Agreement is closed |
+| `FROZEN` | Fraud signals detected on the agreement | Contact Vouch support immediately; do not proceed |
+| `REFUNDED` | Funds returned to the buyer | Agreement is closed; no further action required |
+
+<Warning>
+If an agreement reaches `FROZEN`, do not attempt to unblock it programmatically. Reach out to Vouch support with the agreement ID so the trust and safety team can review the fraud signals before any funds move.
+</Warning>
+
+## Dashboard Audit Logs
+
+The developer dashboard records a timestamped audit trail for every significant event in your account. Key events logged include:
+
+- **`IDENTITY_VERIFIED`** — a user completed identity verification successfully
+- **`FRAUD_BLOCKED`** — a transaction was halted due to RED fraud signals
+- **`DISBURSEMENT_COMPLETED`** — funds were successfully sent to the seller's account
+
+These logs let you reconstruct the exact sequence of events for any agreement without querying the API — useful for customer support investigations, compliance reviews, and debugging unexpected state transitions.
+
+<Accordion title="Can I receive push notifications instead of polling?">
+Outbound webhook delivery to your own endpoints is not yet available. Today, use the `vouch.escrow.status()` polling approach in your backend or monitor the developer dashboard for real-time updates. See the note below for the roadmap.
+</Accordion>
+
+<Accordion title="How often should I poll for status changes?">
+Poll at a cadence appropriate to your payment window. For most integrations, every 5–10 seconds over a 2–3 minute window covers instant bank transfers. Avoid polling more frequently than once per second, and always implement a maximum attempt cap to prevent infinite loops in your application.
+</Accordion>
+
+<Note>
+Full outbound webhook configuration — allowing Vouch to POST agreement events directly to your own endpoint — is planned for a future release. When available, you will be able to register webhook URLs in the developer dashboard and receive signed event payloads for all status transitions listed above.
+</Note>

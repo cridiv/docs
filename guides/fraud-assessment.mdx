@@ -1,0 +1,161 @@
+---
+title: "Integrating Real-Time Fraud Assessment into Payment Flows"
+sidebarTitle: "Fraud Assessment"
+description: "Learn how to call fraud.assess() before payments and escrow funding, interpret risk flags, and implement step-up verification for AMBER-risk transactions."
+---
+
+Fraud assessment lets you score a transaction in real time before it is processed. You should call `vouch.fraud.assess()` before any payment is accepted, before an escrow is funded, or whenever you detect unusual activity on an account. Vouch analyses a combination of device signals, geolocation data, transaction behaviour, and identity status to return a risk score and a clear recommended action.
+
+<Steps>
+
+  <Step title="Assess a Transaction">
+    Call `vouch.fraud.assess()` with the platform user ID and the amount being transacted. Link the assessment to an escrow agreement by passing `agreementId` when one exists.
+
+    ```typescript
+    import Vouch from 'vouch-sdk';
+
+    const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+
+    const assessment = await vouch.fraud.assess({
+      platformUserId: 'user-abc-123',
+      transactionAmount: 25000,
+      agreementId: 'agr_xyz789', // optional — links the assessment to an escrow
+    });
+
+    console.log(assessment.score);            // e.g. 18
+    console.log(assessment.flag);             // 'GREEN' | 'AMBER' | 'RED'
+    console.log(assessment.recommendation);   // human-readable guidance
+    console.log(assessment.triggeredSignals); // array of signal keys
+    ```
+  </Step>
+
+  <Step title="Handle the Response">
+    Branch your logic on `assessment.flag`. Each flag maps to a distinct risk level and requires a different response.
+
+    ```typescript
+    switch (assessment.flag) {
+      case 'GREEN':
+        // Low risk — proceed with the transaction
+        await proceedWithPayment(transactionId);
+        break;
+
+      case 'AMBER':
+        // Elevated risk — pause the transaction and require step-up verification
+        await holdTransaction(transactionId);
+        await promptStepUpVerification(assessment.platformUserId);
+        break;
+
+      case 'RED':
+        // High risk — block the transaction immediately
+        await blockTransaction(transactionId);
+        await notifyComplianceTeam({
+          userId: assessment.platformUserId,
+          score: assessment.score,
+          signals: assessment.triggeredSignals,
+        });
+        break;
+
+      default:
+        throw new Error(`Unexpected fraud flag: ${assessment.flag}`);
+    }
+    ```
+
+    | Flag | Score range | Meaning | Recommended action |
+    |---|---|---|---|
+    | `GREEN` | 0–39 | Low risk | Proceed |
+    | `AMBER` | 40–69 | Elevated risk | Require step-up |
+    | `RED` | 70–100 | High risk | Block |
+  </Step>
+
+  <Step title="Interpret Triggered Signals">
+    `assessment.triggeredSignals` is an array of string keys that explain _why_ the score is elevated. Use these to make more granular decisions and to surface useful guidance to users.
+
+    | Signal | What it means |
+    |---|---|
+    | `vpn_detected` | The user is connecting through a VPN. This may be legitimate, but increases anonymity risk. |
+    | `proxy_detected` | Traffic is routed through a proxy or Tor exit node, which is a stronger indicator of evasion. |
+    | `impossible_travel` | The user's current geolocation conflicts with a recent session — e.g. logins from two countries within minutes. |
+    | `device_mismatch` | The current device fingerprint differs from the device used during onboarding. |
+    | `velocity_anomaly` | The user has made an unusually high number of transactions in a short window. |
+    | `identity_not_verified` | The user has not completed KYC. Pair with the [KYC flow](/guides/kyc-flow) to resolve this. |
+
+    ```typescript
+    if (assessment.triggeredSignals.includes('identity_not_verified')) {
+      // Redirect the user to complete KYC before continuing
+      redirectTo('/verify-identity');
+    }
+
+    if (assessment.triggeredSignals.includes('impossible_travel')) {
+      // Log for security review and prompt the user to confirm their location
+      await logSecurityEvent('impossible_travel', assessment.platformUserId);
+    }
+    ```
+  </Step>
+
+  <Step title="Implement Step-Up Verification">
+    When the flag is `AMBER`, the safest response is to pause the transaction and ask the user to re-verify their identity. If they pass, you can reassess the transaction and allow it to proceed.
+
+    ```typescript
+    async function handleAmberRisk(userId: string, transactionId: string) {
+      // 1. Hold the transaction
+      await holdTransaction(transactionId);
+
+      // 2. Trigger re-verification via the Vouch identity modal
+      const verificationResult = await vouch.identity.verify(userId);
+
+      if (verificationResult.data.identityVerified) {
+        // 3. Re-assess now that identity is confirmed
+        const reAssessment = await vouch.fraud.assess({
+          platformUserId: userId,
+          transactionAmount: getTransactionAmount(transactionId),
+        });
+
+        if (reAssessment.flag === 'GREEN') {
+          // 4. Release the transaction
+          await releaseTransaction(transactionId);
+        } else {
+          // Still elevated — escalate for manual review
+          await escalateForReview(transactionId);
+        }
+      } else {
+        // Verification failed — cancel the transaction
+        await cancelTransaction(transactionId);
+      }
+    }
+    ```
+  </Step>
+
+</Steps>
+
+## Best Practices
+
+Combining identity verification and fraud assessment gives you layered protection. Run KYC once during onboarding (see the [KYC flow guide](/guides/kyc-flow)), then call `vouch.fraud.assess()` on every subsequent payment. This way, the `identity_not_verified` signal never appears for legitimate users and the overall score stays low.
+
+```typescript
+// Recommended payment gate
+async function gatedPayment(userId: string, amount: number, agreementId?: string) {
+  // Step 1: Ensure the user is verified
+  const identity = await vouch.identity.verify(userId);
+  if (!identity.data.identityVerified) {
+    throw new Error('User must complete identity verification before transacting.');
+  }
+
+  // Step 2: Assess fraud risk
+  const assessment = await vouch.fraud.assess({ platformUserId: userId, transactionAmount: amount, agreementId });
+  if (assessment.flag === 'RED') {
+    throw new Error('Transaction blocked due to high fraud risk.');
+  }
+  if (assessment.flag === 'AMBER') {
+    // Handle step-up — see Step 4 above
+    await handleAmberRisk(userId, 'txn_pending');
+    return;
+  }
+
+  // Step 3: GREEN — proceed
+  await processPayment(userId, amount);
+}
+```
+
+<Tip>
+  Always pass `agreementId` when assessing a transaction that is tied to an escrow agreement. This links the fraud assessment record to the agreement for a complete audit trail — useful for dispute resolution and compliance reviews.
+</Tip>

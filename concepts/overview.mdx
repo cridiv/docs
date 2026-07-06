@@ -1,0 +1,71 @@
+---
+title: "Understanding the Vouch Platform: Core Concepts"
+sidebarTitle: "Overview"
+description: "Learn how Vouch's three modules — Identity Verification, Fraud Detection, and Escrow — work together to build end-to-end trust in your product."
+---
+
+Vouch is a trust infrastructure SDK that gives you three composable modules: identity verification, fraud detection, and milestone-based escrow. Each module solves a distinct problem, but they are designed to work together along a single trust lifecycle — from confirming who your users are, to assessing the risk of their actions, to holding and releasing funds only when both parties agree work is done.
+
+## The trust lifecycle
+
+Every secure transaction on Vouch follows the same sequence of steps. Complete each stage before moving to the next to unlock the strongest fraud signals and the lowest dispute rate.
+
+<Steps>
+  <Step title="Verify identity">
+    Run `vouch.identity.verify()` to confirm a user's real-world identity against a government-issued document and a live selfie. A verified identity raises the quality of every downstream fraud signal.
+  </Step>
+  <Step title="Assess fraud risk">
+    Call `vouch.fraud.assess()` before any sensitive action — login, payment initiation, or agreement creation. Vouch scores the action from 0–100 and returns a GREEN, AMBER, or RED flag.
+  </Step>
+  <Step title="Create an escrow agreement">
+    Use `vouch.escrow.create()` to define milestones and the amount held in trust between a buyer and a seller. Funds are not released until both parties confirm each milestone.
+  </Step>
+  <Step title="Fund the agreement">
+    Run `vouch.escrow.assess()` to perform a fraud check scoped to the funding event. On a GREEN result, Vouch provisions a unique virtual bank account the buyer deposits into.
+  </Step>
+  <Step title="Confirm milestones">
+    Both the buyer and the seller must call `vouch.escrow.confirm()` for each milestone. Only when both confirmations are recorded does Vouch disburse the corresponding funds to the seller.
+  </Step>
+</Steps>
+
+## The three modules
+
+<CardGroup cols={3}>
+  <Card title="Identity Verification" icon="id-card" href="/concepts/identity-verification">
+    Verify a user's identity with OCR document parsing, ArcFace biometric face matching, and multi-frame liveness detection. A match score of 90 or above marks the user as verified.
+  </Card>
+  <Card title="Fraud Detection" icon="shield-halved" href="/concepts/fraud-detection">
+    Score every transaction in real time using a hybrid engine of deterministic rules and a LightGBM ML model. Device fingerprinting is collected automatically — no setup required.
+  </Card>
+  <Card title="Escrow" icon="vault" href="/concepts/escrow">
+    Hold funds in trust across milestone-based agreements. A virtual bank account is provisioned per agreement, and funds are disbursed automatically once both parties confirm.
+  </Card>
+</CardGroup>
+
+## Key terminology
+
+Understanding the following terms will help you navigate the Vouch SDK and its API responses.
+
+<Accordion title="PlatformUser">
+  A PlatformUser is any account registered under your API key. Each PlatformUser maps to one set of identity verification results and a cumulative fraud history that Vouch uses to improve signal accuracy over time.
+</Accordion>
+
+<Accordion title="ExternalUserId">
+  The `externalUserId` is the unique identifier you assign to a user in your own system — for example, a database UUID or a hashed email. You pass it to Vouch on every call so Vouch can correlate activity across sessions without storing your internal identifiers in an opaque way.
+</Accordion>
+
+<Accordion title="Agreement">
+  An Agreement is an escrow contract created between a buyer and a seller. It defines the total amount, the currency, and a set of one or more Milestones. Agreements move through a defined status state machine from `PENDING` through to `DISBURSED` or `REFUNDED`.
+</Accordion>
+
+<Accordion title="Milestone">
+  A Milestone is a discrete deliverable within an Agreement. Each Milestone has its own amount and description. Funds tied to a Milestone are disbursed only after both the buyer and the seller have confirmed it. Milestones move from `PENDING` → `BUYER_CONFIRMED` / `SELLER_CONFIRMED` → `COMPLETED` → `DISBURSED`.
+</Accordion>
+
+<Accordion title="FraudFlag">
+  A FraudFlag is the categorical risk verdict returned by `vouch.fraud.assess()`. There are three values: `GREEN` (score 0–39, low risk), `AMBER` (score 40–69, elevated risk), and `RED` (score 70–100, high risk). Your application should branch on this value to decide whether to proceed, request step-up verification, or block the action.
+</Accordion>
+
+<Accordion title="IdentityMatchScore">
+  The `identityMatchScore` is a 0–99 integer that represents the ArcFace biometric similarity between the selfie captured during verification and the portrait extracted from the submitted document. A score of 90 or above sets `identityVerified: true` on the user's profile.
+</Accordion>

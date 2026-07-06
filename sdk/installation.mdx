@@ -1,0 +1,113 @@
+---
+title: "Installing and Initializing the Vouch SDK"
+sidebarTitle: "Installation"
+description: "Install the Vouch SDK via npm, pnpm, or yarn and initialize it with your API key to start integrating trust infrastructure."
+---
+
+The Vouch SDK is a TypeScript-first package that gives your application access to identity verification, fraud assessment, and escrow primitives through a single unified client. Install it once, initialize it with your API key, and every module is available on the resulting instance.
+
+## Install the package
+
+<CodeGroup>
+
+```bash npm
+npm install vouch-sdk
+```
+
+```bash pnpm
+pnpm add vouch-sdk
+```
+
+```bash yarn
+yarn add vouch-sdk
+```
+
+</CodeGroup>
+
+## Initialize the client
+
+Import the `Vouch` class and construct a client with your developer API key. Store the instance somewhere your application can reuse it — a singleton module, a provider, or a dependency-injection container.
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch('your-api-key');
+```
+
+You can also pass an `options` object to override the default API or modal URLs:
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch('your-api-key', {
+  apiUrl: 'https://my-proxy.example.com/v1',
+  verifyUrl: 'https://my-custom-modal.example.com',
+});
+```
+
+### Constructor parameters
+
+<ParamField path="apiKey" type="string" required>
+  Your developer API key, obtained from the Vouch dashboard. This key is sent with every SDK request to authenticate your application.
+</ParamField>
+
+<ParamField path="options.apiUrl" type="string">
+  Override the backend API base URL. Defaults to `https://vouch-fmql.onrender.com/v1`. Use this when routing requests through a proxy or when working against a self-hosted Vouch instance.
+</ParamField>
+
+<ParamField path="options.verifyUrl" type="string">
+  Override the URL of the hosted identity verification modal. Defaults to `https://vouch-modal.vercel.app`. Override this only if you are deploying your own modal instance.
+</ParamField>
+
+## Environment variables
+
+The SDK automatically reads `VOUCH_API_URL` from the environment and uses it as the `apiUrl` if no explicit value is passed in `options`. Set this in your `.env` file or deployment environment to avoid hard-coding URLs:
+
+```bash
+VOUCH_API_URL=https://my-proxy.example.com/v1
+```
+
+<Note>
+  `VOUCH_API_URL` is only applied when `options.apiUrl` is not provided. An explicit constructor option always takes precedence.
+</Note>
+
+## ESM configuration
+
+The Vouch SDK ships exclusively as ES modules. If you are using TypeScript in a Node.js project, make sure your `tsconfig.json` targets a compatible module system:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2020"
+  }
+}
+```
+
+For browser bundlers (Vite, webpack, Rollup) or Next.js projects, `"module": "ESNext"` is the typical setting and no extra configuration is needed.
+
+<Warning>
+  If you see `ERR_REQUIRE_ESM` at runtime, your project is attempting to `require()` an ES module. Switch your entry point to use `import` syntax, or set `"type": "module"` in your `package.json`.
+</Warning>
+
+## Import styles
+
+Use the default import for the `Vouch` class, named imports for individual interfaces and utilities, or both together:
+
+```typescript
+// Default import — the Vouch client class
+import Vouch from 'vouch-sdk';
+
+// Named imports — types and utilities
+import type { VouchOptions, FraudAssessParams } from 'vouch-sdk';
+import { getDeviceFingerprint } from 'vouch-sdk';
+
+// Combined
+import Vouch, { getDeviceFingerprint } from 'vouch-sdk';
+import type { IdentityVerifyResult } from 'vouch-sdk';
+```
+
+<Tip>
+  Keep a single shared `vouch` instance across your application rather than constructing a new one per request. The SDK is stateless with respect to individual calls, so one instance is safe to reuse in any context.
+</Tip>

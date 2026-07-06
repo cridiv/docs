@@ -1,0 +1,211 @@
+---
+title: "Create an Escrow Agreement — Vouch API"
+sidebarTitle: "Create Agreement"
+description: "Create a new escrow agreement between a buyer and seller, defining the total amount and milestone breakdown for structured fund release."
+---
+
+The Create Agreement endpoint initialises a new escrow contract between two parties identified by your platform's own user IDs. You supply the buyer and seller external IDs, a total amount, and an array of milestones that define how funds will be released in stages. Vouch returns a fully formed agreement object in `PENDING` status — funding can begin once you run a payment risk assessment against it.
+
+## Endpoint
+
+```
+POST /v1/escrow/agreements
+```
+
+## Request
+
+### Headers
+
+<ParamField header="x-api-key" type="string" required>
+  Your Vouch API key. All protected routes require this header.
+</ParamField>
+
+### Body Parameters
+
+<ParamField body="buyerExternalId" type="string" required>
+  Your platform's unique identifier for the buyer. This is the ID you use in your own system — Vouch does not manage user accounts for you.
+</ParamField>
+
+<ParamField body="sellerExternalId" type="string" required>
+  Your platform's unique identifier for the seller.
+</ParamField>
+
+<ParamField body="totalAmount" type="number" required>
+  The total value of the agreement in the smallest currency unit (kobo for NGN). Must equal the sum of all milestone amounts.
+</ParamField>
+
+<ParamField body="milestones" type="array" required>
+  An ordered list of milestones that define how the escrowed funds are released. At least one milestone is required.
+
+  <Expandable title="Milestone object">
+    <ParamField body="milestones[].title" type="string" required>
+      A short label for this milestone, e.g. `"Sprint 1: Design"`.
+    </ParamField>
+
+    <ParamField body="milestones[].amount" type="number" required>
+      The amount allocated to this milestone in the smallest currency unit.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="currency" type="string" default="NGN">
+  ISO 4217 currency code. Defaults to `NGN` if omitted.
+</ParamField>
+
+<ParamField body="buyerEmail" type="string">
+  Optional email address for the buyer. Used for notifications and virtual account labelling.
+</ParamField>
+
+<ParamField body="buyerName" type="string">
+  Optional display name for the buyer. Appears on the generated virtual account when the agreement is funded.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://vouch-fmql.onrender.com/v1/escrow/agreements \
+  --header "Content-Type: application/json" \
+  --header "x-api-key: <YOUR_API_KEY>" \
+  --data '{
+    "buyerExternalId": "client_buyer_123",
+    "sellerExternalId": "client_seller_456",
+    "totalAmount": 500000,
+    "currency": "NGN",
+    "buyerEmail": "finance@acme.com",
+    "buyerName": "Acme Holdings",
+    "milestones": [
+      { "title": "Sprint 1: Design", "amount": 200000 },
+      { "title": "Sprint 2: Development", "amount": 300000 }
+    ]
+  }'
+```
+
+```typescript TypeScript
+import Vouch from "@vouch/sdk";
+
+const vouch = new Vouch({ apiKey: process.env.VOUCH_API_KEY });
+
+const agreement = await vouch.escrow.create({
+  buyerExternalId: "client_buyer_123",
+  sellerExternalId: "client_seller_456",
+  totalAmount: 500000,
+  currency: "NGN",
+  buyerEmail: "finance@acme.com",
+  buyerName: "Acme Holdings",
+  milestones: [
+    { title: "Sprint 1: Design", amount: 200000 },
+    { title: "Sprint 2: Development", amount: 300000 },
+  ],
+});
+
+console.log(agreement.id); // "agr_clx8f7k2z000108l4"
+```
+
+</CodeGroup>
+
+## Response
+
+A successful request returns HTTP `201 Created` with the full agreement object.
+
+<ResponseField name="id" type="string">
+  Vouch's unique identifier for this agreement, prefixed with `agr_`.
+</ResponseField>
+
+<ResponseField name="developerId" type="string">
+  The ID of the developer account that created this agreement.
+</ResponseField>
+
+<ResponseField name="buyerExternalId" type="string">
+  The buyer identifier you provided.
+</ResponseField>
+
+<ResponseField name="sellerExternalId" type="string">
+  The seller identifier you provided.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current lifecycle status of the agreement. Newly created agreements always start as `PENDING`.
+</ResponseField>
+
+<ResponseField name="nombaVirtualAccountNo" type="string | null">
+  The virtual bank account number used to fund this agreement. This is `null` until a successful payment risk assessment is completed with a `GREEN` or `AMBER` flag.
+</ResponseField>
+
+<ResponseField name="totalAmount" type="number">
+  Total value of the agreement in the smallest currency unit.
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  ISO 4217 currency code for this agreement.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the agreement was created.
+</ResponseField>
+
+<ResponseField name="milestones" type="array">
+  The milestones associated with this agreement.
+
+  <Expandable title="Milestone fields">
+    <ResponseField name="id" type="string">
+      Unique identifier for the milestone, prefixed with `ms_`.
+    </ResponseField>
+
+    <ResponseField name="title" type="string">
+      The label you provided for this milestone.
+    </ResponseField>
+
+    <ResponseField name="amount" type="number">
+      The amount allocated to this milestone in the smallest currency unit.
+    </ResponseField>
+
+    <ResponseField name="buyerConfirmed" type="boolean">
+      Whether the buyer has confirmed completion of this milestone.
+    </ResponseField>
+
+    <ResponseField name="sellerConfirmed" type="boolean">
+      Whether the seller has confirmed completion of this milestone.
+    </ResponseField>
+
+    <ResponseField name="status" type="string">
+      Current status of this individual milestone. One of `PENDING`, `BUYER_CONFIRMED`, `SELLER_CONFIRMED`, or `COMPLETED`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "id": "agr_clx8f7k2z000108l4",
+  "developerId": "dev_abc123",
+  "buyerExternalId": "client_buyer_123",
+  "sellerExternalId": "client_seller_456",
+  "status": "PENDING",
+  "nombaVirtualAccountNo": null,
+  "totalAmount": 500000,
+  "currency": "NGN",
+  "createdAt": "2026-07-01T12:00:00.000Z",
+  "milestones": [
+    {
+      "id": "ms_001",
+      "title": "Sprint 1: Design",
+      "amount": 200000,
+      "buyerConfirmed": false,
+      "sellerConfirmed": false,
+      "status": "PENDING"
+    },
+    {
+      "id": "ms_002",
+      "title": "Sprint 2: Development",
+      "amount": 300000,
+      "buyerConfirmed": false,
+      "sellerConfirmed": false,
+      "status": "PENDING"
+    }
+  ]
+}
+```

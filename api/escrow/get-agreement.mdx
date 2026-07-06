@@ -1,0 +1,142 @@
+---
+title: "Retrieve an Escrow Agreement — Vouch API"
+sidebarTitle: "Get Agreement"
+description: "Fetch the full state of an escrow agreement, including its current status, virtual account number, and the confirmation state of every milestone."
+---
+
+Use this endpoint to retrieve the latest state of any escrow agreement your platform has created. The response includes the top-level agreement status, the virtual bank account number (once assigned), and the full milestones array with individual confirmation flags. You can poll this endpoint to keep your UI in sync with the agreement lifecycle, or call it on demand when a user loads an agreement detail view.
+
+## Endpoint
+
+```
+GET /v1/escrow/agreements/:id
+```
+
+## Request
+
+### Headers
+
+<ParamField header="x-api-key" type="string" required>
+  Your Vouch API key.
+</ParamField>
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique ID of the agreement to retrieve (e.g. `agr_clx8f7k2z000108l4`).
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://vouch-fmql.onrender.com/v1/escrow/agreements/agr_clx8f7k2z000108l4 \
+  --header "x-api-key: <YOUR_API_KEY>"
+```
+
+```typescript TypeScript
+import Vouch from "@vouch/sdk";
+
+const vouch = new Vouch({ apiKey: process.env.VOUCH_API_KEY });
+
+const agreement = await vouch.escrow.status("agr_clx8f7k2z000108l4");
+
+console.log(agreement.status);              // "FUNDED"
+console.log(agreement.nombaVirtualAccountNo); // "9988771122"
+```
+
+</CodeGroup>
+
+## Response
+
+A successful request returns HTTP `200 OK` with the full agreement object.
+
+<ResponseField name="id" type="string">
+  Vouch's unique identifier for the agreement.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  The current lifecycle status of the agreement. See the [status reference](#agreement-status-reference) below for all possible values.
+</ResponseField>
+
+<ResponseField name="nombaVirtualAccountNo" type="string | null">
+  The virtual bank account number linked to this agreement. This is `null` until a successful `GREEN` or `AMBER` risk assessment has been completed for the agreement.
+</ResponseField>
+
+<ResponseField name="totalAmount" type="number">
+  Total value of the agreement in the smallest currency unit.
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  ISO 4217 currency code for this agreement.
+</ResponseField>
+
+<ResponseField name="milestones" type="array">
+  The complete list of milestones for this agreement and their current states.
+
+  <Expandable title="Milestone fields">
+    <ResponseField name="id" type="string">
+      Unique identifier for the milestone.
+    </ResponseField>
+
+    <ResponseField name="title" type="string">
+      The label provided when the agreement was created.
+    </ResponseField>
+
+    <ResponseField name="amount" type="number">
+      The amount allocated to this milestone in the smallest currency unit.
+    </ResponseField>
+
+    <ResponseField name="buyerConfirmed" type="boolean">
+      Whether the buyer has confirmed completion of this milestone.
+    </ResponseField>
+
+    <ResponseField name="sellerConfirmed" type="boolean">
+      Whether the seller has confirmed completion of this milestone.
+    </ResponseField>
+
+    <ResponseField name="status" type="string">
+      Current status of this individual milestone. One of `PENDING`, `BUYER_CONFIRMED`, `SELLER_CONFIRMED`, or `COMPLETED`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "id": "agr_clx8f7k2z000108l4",
+  "status": "FUNDED",
+  "nombaVirtualAccountNo": "9988771122",
+  "totalAmount": 500000,
+  "currency": "NGN",
+  "milestones": [
+    {
+      "id": "ms_001",
+      "title": "Sprint 1: Design",
+      "amount": 200000,
+      "buyerConfirmed": false,
+      "sellerConfirmed": false,
+      "status": "PENDING"
+    }
+  ]
+}
+```
+
+## Agreement Status Reference
+
+The `status` field reflects where the agreement currently sits in its lifecycle. Use this table to drive state transitions in your UI.
+
+| Status | Description |
+|---|---|
+| `PENDING` | Agreement created; awaiting risk assessment and initial funding. |
+| `PARTIAL` | A payment has been received but the total amount has not yet been reached. |
+| `FUNDED` | The full agreement amount has been received into escrow. Work can begin. |
+| `OVERFUNDED` | More than the agreed total amount has been deposited. |
+| `IN_PROGRESS` | At least one milestone confirmation has been submitted; work is underway. |
+| `COMPLETED` | All milestones have been confirmed by both parties. |
+| `DISBURSED` | All funds have been released to the seller. |
+| `REFUNDED` | Funds have been returned to the buyer. |
+| `FROZEN` | The agreement has been frozen, typically due to a dispute or compliance hold. |

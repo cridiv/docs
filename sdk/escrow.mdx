@@ -1,0 +1,294 @@
+---
+title: "Managing Escrow Agreements with the Vouch SDK"
+sidebarTitle: "Escrow"
+description: "Create milestone-based escrow agreements, assess payment risk, confirm deliverables, and track agreement status through the full lifecycle."
+---
+
+The escrow module orchestrates structured payment agreements between a buyer and a seller. You break a transaction into milestones, Vouch holds the funds, and disbursement happens only after both parties confirm each milestone. The module also runs a fraud assessment at the payment step, so you catch bad actors before funds are ever collected.
+
+There are four methods in the escrow module: `create`, `assess`, `confirm`, and `status`.
+
+---
+
+## `vouch.escrow.create(params)`
+
+Create a new escrow agreement by specifying the parties, the total amount, and the milestone breakdown. Vouch returns an agreement record including an ID you will use in all subsequent calls.
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch('your-api-key');
+
+const agreement = await vouch.escrow.create({
+  buyerExternalId: 'buyer-001',
+  sellerExternalId: 'seller-042',
+  totalAmount: 500000,
+  currency: 'NGN',
+  milestones: [
+    { title: 'Design mockups', amount: 150000 },
+    { title: 'Frontend implementation', amount: 200000 },
+    { title: 'Final delivery & handover', amount: 150000 },
+  ],
+  buyerEmail: 'buyer@example.com',
+  buyerName: 'Amara Obi',
+});
+
+console.log('Agreement ID:', agreement.id);
+console.log('Virtual account:', agreement.nombaVirtualAccountNo);
+```
+
+### Parameters
+
+<ParamField body="buyerExternalId" type="string" required>
+  Your platform's unique identifier for the buyer — the party that will fund the escrow.
+</ParamField>
+
+<ParamField body="sellerExternalId" type="string" required>
+  Your platform's unique identifier for the seller — the party that will receive disbursements.
+</ParamField>
+
+<ParamField body="totalAmount" type="number" required>
+  The total agreement value in the base currency unit (e.g., kobo for NGN). Must equal the sum of all milestone amounts.
+</ParamField>
+
+<ParamField body="currency" type="string">
+  ISO 4217 currency code. Defaults to `"NGN"`.
+</ParamField>
+
+<ParamField body="milestones" type="{ title: string; amount: number }[]" required>
+  An ordered array of milestone objects. Each milestone has a `title` (descriptive label) and an `amount` (in base currency units). Disbursement is unlocked per milestone as both parties confirm.
+</ParamField>
+
+<ParamField body="buyerEmail" type="string">
+  Optional email address for the buyer. Vouch may use this for payment instructions and notifications.
+</ParamField>
+
+<ParamField body="buyerName" type="string">
+  Optional display name for the buyer, used in communication and agreement records.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="id" type="string">
+  The Vouch-assigned unique identifier for this agreement. Store this — you need it for `assess`, `confirm`, and `status` calls.
+</ResponseField>
+
+<ResponseField name="developerId" type="string">
+  The developer account ID associated with this agreement.
+</ResponseField>
+
+<ResponseField name="buyerExternalId" type="string">
+  The buyer ID you supplied, echoed back for confirmation.
+</ResponseField>
+
+<ResponseField name="sellerExternalId" type="string">
+  The seller ID you supplied, echoed back for confirmation.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current lifecycle status of the agreement. See the status reference at the end of this page.
+</ResponseField>
+
+<ResponseField name="nombaVirtualAccountNo" type="string | null">
+  A virtual account number the buyer can pay into. May be `null` until the agreement is ready to receive funds.
+</ResponseField>
+
+<ResponseField name="totalAmount" type="number">
+  Total agreement value in base currency units.
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  Currency code for the agreement.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the agreement was created.
+</ResponseField>
+
+<ResponseField name="milestones" type="object[]">
+  The milestone records associated with the agreement.
+
+  <Expandable title="milestone fields">
+    <ResponseField name="milestones[].id" type="string">
+      Vouch-assigned unique identifier for the milestone. Use this in `confirm` calls.
+    </ResponseField>
+
+    <ResponseField name="milestones[].title" type="string">
+      Descriptive label for the milestone.
+    </ResponseField>
+
+    <ResponseField name="milestones[].amount" type="number">
+      Value of this milestone in base currency units.
+    </ResponseField>
+
+    <ResponseField name="milestones[].buyerConfirmed" type="boolean">
+      Whether the buyer has confirmed this milestone as complete.
+    </ResponseField>
+
+    <ResponseField name="milestones[].sellerConfirmed" type="boolean">
+      Whether the seller has confirmed this milestone as complete.
+    </ResponseField>
+
+    <ResponseField name="milestones[].status" type="string">
+      The current status of this individual milestone (e.g., `PENDING`, `CONFIRMED`, `DISBURSED`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## `vouch.escrow.assess(agreementId, params)`
+
+Before collecting funds, run a fraud assessment tied to the agreement. If the assessment passes, Vouch returns a virtual account number the buyer can pay into.
+
+```typescript
+const fundingCheck = await vouch.escrow.assess(agreement.id, {
+  externalUserId: 'buyer-001',
+  transactionAmount: 500000,
+});
+
+if (fundingCheck.flag === 'RED') {
+  // Block this payment attempt
+  throw new Error('Payment blocked due to high fraud risk.');
+}
+
+if (fundingCheck.virtualAccount) {
+  const { accountNumber, bankCode, accountName } = fundingCheck.virtualAccount;
+  console.log(`Pay to: ${accountName} — ${accountNumber} (${bankCode})`);
+}
+```
+
+### Parameters
+
+<ParamField path="agreementId" type="string" required>
+  The ID of the agreement returned by `vouch.escrow.create()`.
+</ParamField>
+
+<ParamField body="externalUserId" type="string" required>
+  Your platform's identifier for the user initiating payment (typically the buyer).
+</ParamField>
+
+<ParamField body="transactionAmount" type="number" required>
+  The amount being assessed in base currency units. This should match the agreement's `totalAmount` or the milestone amount being funded.
+</ParamField>
+
+<ParamField body="simulateVpn" type="boolean">
+  Force a VPN detection signal. **Sandbox and testing use only.**
+</ParamField>
+
+<ParamField body="simulateImpossibleTravel" type="boolean">
+  Force an impossible travel signal. **Sandbox and testing use only.**
+</ParamField>
+
+### Response fields
+
+<ResponseField name="score" type="number">
+  Fraud risk score from 0 to 100.
+</ResponseField>
+
+<ResponseField name="flag" type="string">
+  `"GREEN"`, `"AMBER"`, or `"RED"`. See the fraud flag reference in the [Fraud guide](/sdk/fraud).
+</ResponseField>
+
+<ResponseField name="virtualAccount" type="object">
+  Payment details for the buyer. Only returned on `GREEN` or `AMBER` responses.
+
+  <Expandable title="virtualAccount fields">
+    <ResponseField name="virtualAccount.accountNumber" type="string">
+      The virtual account number to pay into.
+    </ResponseField>
+
+    <ResponseField name="virtualAccount.bankCode" type="string">
+      The bank code for the receiving institution.
+    </ResponseField>
+
+    <ResponseField name="virtualAccount.accountName" type="string">
+      The account name associated with the virtual account.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Note>
+  The `virtualAccount` object is only included in the response when the fraud flag is `GREEN` or `AMBER`. A `RED` flag response will not contain payment details — block the session and do not prompt the user to pay.
+</Note>
+
+---
+
+## `vouch.escrow.confirm(agreementId, milestoneId, externalUserId)`
+
+Confirm that a milestone has been completed. Both the buyer and the seller must call this method for the same milestone before Vouch will release the corresponding funds to the seller.
+
+```typescript
+// Called from the buyer's session
+await vouch.escrow.confirm(
+  agreement.id,
+  agreement.milestones[0].id,
+  'buyer-001'
+);
+
+// Called from the seller's session
+await vouch.escrow.confirm(
+  agreement.id,
+  agreement.milestones[0].id,
+  'seller-042'
+);
+
+console.log('Milestone confirmed by both parties — disbursement initiated.');
+```
+
+<ParamField path="agreementId" type="string" required>
+  The ID of the escrow agreement.
+</ParamField>
+
+<ParamField path="milestoneId" type="string" required>
+  The ID of the milestone to confirm, from the `milestones[]` array on the agreement.
+</ParamField>
+
+<ParamField path="externalUserId" type="string" required>
+  Your platform's identifier for the user confirming the milestone. Pass the buyer ID when confirming from the buyer's side, and the seller ID from the seller's side.
+</ParamField>
+
+<Note>
+  **Both parties must confirm independently.** Calling `confirm` from only one side records that party's confirmation but does not trigger disbursement. Disbursement happens automatically once Vouch records confirmation from both `buyerExternalId` and `sellerExternalId`.
+</Note>
+
+---
+
+## `vouch.escrow.status(agreementId)`
+
+Fetch the current state of an agreement, including the latest milestone statuses and confirmation flags. The response shape is identical to the one returned by `create`.
+
+```typescript
+const agreement = await vouch.escrow.status('agr_abc123');
+
+console.log('Agreement status:', agreement.status);
+
+for (const milestone of agreement.milestones) {
+  console.log(`${milestone.title}:`);
+  console.log(`  Buyer confirmed: ${milestone.buyerConfirmed}`);
+  console.log(`  Seller confirmed: ${milestone.sellerConfirmed}`);
+  console.log(`  Status: ${milestone.status}`);
+}
+```
+
+The response is the same `AgreementResponse` object returned by `create`. Refer to the [create response fields](#response-fields) section above for full field documentation.
+
+---
+
+## Agreement status reference
+
+| Status | Meaning |
+|--------|---------|
+| `PENDING` | Agreement created, no funds received yet. |
+| `PARTIAL` | Buyer has made a partial payment. |
+| `FUNDED` | Full amount received and held in escrow. |
+| `OVERFUNDED` | More than the agreed amount was received. |
+| `IN_PROGRESS` | At least one milestone is being worked on. |
+| `COMPLETED` | All milestones confirmed by both parties. |
+| `DISBURSED` | Funds released to the seller. |
+| `REFUNDED` | Funds returned to the buyer. |
+| `FROZEN` | Agreement suspended pending review. |
+
+<Warning>
+  Do not allow the seller to begin work on a milestone until the agreement status is `FUNDED`. Partial payments leave some milestones without sufficient coverage, which may delay disbursement.
+</Warning>

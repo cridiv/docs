@@ -1,0 +1,192 @@
+---
+title: "Testing Your Vouch SDK Integration From End to End"
+sidebarTitle: "Testing"
+description: "Use simulation flags and mock utilities to test fraud detection, identity verification, and escrow flows without real documents or live transactions."
+---
+
+Vouch provides built-in simulation flags and mocking utilities so you can fully exercise your integration logic — including all fraud flag branches and identity outcomes — without submitting real identity documents or initiating live bank transfers. This guide covers every technique you need to build a reliable, well-tested integration.
+
+## Testing Fraud Detection
+
+Use the `simulateVpn` and `simulateImpossibleTravel` flags on `vouch.fraud.assess()` and `vouch.escrow.assess()` to force specific risk outcomes in your development environment.
+
+| Simulation flag | Triggered signal | Expected score | Expected flag |
+|---|---|---|---|
+| `simulateVpn: true` | `vpn_detected` | ≥ 70 | `RED` |
+| `simulateImpossibleTravel: true` | `impossible_travel` | ≥ 70 | `RED` |
+| Neither flag, verified user, low amount | — | < 40 | `GREEN` |
+| Neither flag, new account, high amount | `velocity_anomaly` or `identity_not_verified` | 40–69 | `AMBER` |
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+
+// Test RED flag — VPN simulation
+const red = await vouch.fraud.assess({
+  platformUserId: 'test-user',
+  transactionAmount: 50000,
+  simulateVpn: true,
+});
+// red.flag === 'RED'
+// red.triggeredSignals includes 'vpn_detected'
+
+// Test RED flag — impossible travel simulation
+const redTravel = await vouch.fraud.assess({
+  platformUserId: 'test-user',
+  transactionAmount: 50000,
+  simulateImpossibleTravel: true,
+});
+// redTravel.flag === 'RED'
+// redTravel.triggeredSignals includes 'impossible_travel'
+
+// Test GREEN flag — verified user, normal amount, no simulation flags
+const green = await vouch.fraud.assess({
+  platformUserId: 'verified-user',
+  transactionAmount: 5000,
+});
+// green.flag === 'GREEN'
+// green.triggeredSignals === []
+```
+
+To produce an `AMBER` result, use a freshly created test user ID (so the account has no verification history) together with a high transaction amount. This typically triggers `identity_not_verified` and nudges the score into the 40–69 range.
+
+```typescript
+// Test AMBER flag — new account, high amount
+const amber = await vouch.fraud.assess({
+  platformUserId: 'brand-new-test-user-' + Date.now(),
+  transactionAmount: 200000,
+});
+// amber.flag === 'AMBER' (depending on account state and amount thresholds)
+```
+
+<Tip>
+  Always test all three fraud flag branches (GREEN, AMBER, RED) in your integration test suite. Your payment flow has distinct code paths for each — leaving any branch untested means you may only discover bugs in production.
+</Tip>
+
+<Tip>
+  Pay particular attention to the AMBER path. Step-up verification involves multiple async calls (hold transaction → prompt re-verification → re-assess), and this is the branch most commonly broken by integration regressions.
+</Tip>
+
+## Testing Identity Verification
+
+In development, `vouch.identity.submitVerification()` still processes files through the full pipeline — you can pass any image file and observe the response. Use distinct `externalUserId` values for each test case so the results don't overwrite one another.
+
+```typescript
+import * as fs from 'fs';
+import { Blob } from 'buffer';
+
+// Load test images from your fixtures directory
+const docBuffer = fs.readFileSync('./fixtures/test-passport.jpg');
+const documentFile = new Blob([docBuffer], { type: 'image/jpeg' });
+
+const selfieBuffer = fs.readFileSync('./fixtures/test-selfie.jpg');
+const selfieFrame = new Blob([selfieBuffer], { type: 'image/jpeg' });
+
+const result = await vouch.identity.submitVerification(
+  documentFile,
+  [selfieFrame, selfieFrame, selfieFrame], // three frames
+  'test-kyc-user-001'
+);
+
+console.log(result.data.identityVerified);    // true | false
+console.log(result.data.livenessPassed);      // true | false
+console.log(result.data.identityMatchScore);  // 0–99
+```
+
+To mock device fingerprinting during tests (for example, to test `device_mismatch` signal handling), set `globalThis.MOCK_FINGERPRINT` to a fixed string before initialising the SDK. This prevents the fingerprinting library from querying real browser APIs, which are unavailable in Node test environments.
+
+```typescript
+// Set before SDK initialisation — use a distinct value per test scenario
+globalThis.MOCK_FINGERPRINT = 'test-device-id';
+
+const vouch = new Vouch(process.env.VOUCH_API_KEY!);
+
+// Now all fingerprint readings in this session return 'test-device-id'
+```
+
+Use a different `MOCK_FINGERPRINT` value in a second test to simulate a device change and verify that your `device_mismatch` handling code is reached.
+
+## Unit Testing Tips
+
+For unit tests where you want zero network calls, mock the entire `vouch-sdk` module. The mock below stubs every method used across the KYC, fraud, and escrow flows with sensible defaults that you can override per test.
+
+```typescript
+// __mocks__/vouch-sdk.ts  (or inside jest.mock() at the top of your test file)
+
+jest.mock('vouch-sdk', () => ({
+  default: jest.fn().mockImplementation(() => ({
+    fraud: {
+      assess: jest.fn().mockResolvedValue({
+        score: 20,
+        flag: 'GREEN',
+        triggeredSignals: [],
+        recommendation: 'Proceed',
+        category: 'Low Risk',
+      }),
+    },
+    identity: {
+      verify: jest.fn().mockResolvedValue({
+        status: 'success',
+        data: {
+          identityVerified: true,
+          livenessPassed: true,
+        },
+      }),
+    },
+    escrow: {
+      create: jest.fn(),
+      assess: jest.fn(),
+      confirm: jest.fn(),
+      status: jest.fn(),
+    },
+  })),
+}));
+```
+
+Override the default mock return value within individual tests to simulate failure paths:
+
+```typescript
+import Vouch from 'vouch-sdk';
+
+const MockVouch = Vouch as jest.MockedClass<typeof Vouch>;
+
+describe('payment gate', () => {
+  it('blocks payment when fraud flag is RED', async () => {
+    MockVouch.mock.instances[0].fraud.assess.mockResolvedValueOnce({
+      score: 85,
+      flag: 'RED',
+      triggeredSignals: ['vpn_detected'],
+      recommendation: 'Block transaction',
+      category: 'High Risk',
+    });
+
+    await expect(gatedPayment('user-001', 50000)).rejects.toThrow(
+      'Transaction blocked due to high fraud risk.'
+    );
+  });
+
+  it('proceeds when fraud flag is GREEN', async () => {
+    // Uses the default mock (GREEN) — no override needed
+    await expect(gatedPayment('user-001', 5000)).resolves.not.toThrow();
+  });
+
+  it('triggers step-up when fraud flag is AMBER', async () => {
+    MockVouch.mock.instances[0].fraud.assess.mockResolvedValueOnce({
+      score: 55,
+      flag: 'AMBER',
+      triggeredSignals: ['velocity_anomaly'],
+      recommendation: 'Require step-up verification',
+      category: 'Medium Risk',
+    });
+
+    const stepUpSpy = jest.spyOn(yourModule, 'handleAmberRisk');
+    await gatedPayment('user-001', 50000);
+    expect(stepUpSpy).toHaveBeenCalledWith('user-001', expect.any(String));
+  });
+});
+```
+
+<Note>
+  Keep your unit test mocks in sync with the actual SDK response shapes shown in the [Fraud Assessment](/guides/fraud-assessment) and [KYC Flow](/guides/kyc-flow) guides. Stale mock data is one of the most common causes of tests that pass locally but fail against the live API.
+</Note>
