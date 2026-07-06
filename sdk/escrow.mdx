@@ -34,7 +34,7 @@ const agreement = await vouch.escrow.create({
 });
 
 console.log('Agreement ID:', agreement.id);
-console.log('Virtual account:', agreement.virtualAccountNo);
+console.log('Pay into:', agreement.nombaVirtualAccountNo, '@', agreement.nombaBank);
 ```
 
 ### Parameters
@@ -89,12 +89,16 @@ console.log('Virtual account:', agreement.virtualAccountNo);
   Current lifecycle status of the agreement. See the status reference at the end of this page.
 </ResponseField>
 
-<ResponseField name="virtualAccountId" type="string | null">
-  A virtual account identifier assigned to this agreement. May be `null` until the agreement is ready to receive funds.
+<ResponseField name="nombaVirtualAccountId" type="string | null">
+  The Nomba-assigned virtual account holder ID for this agreement. May be `null` until provisioning completes.
 </ResponseField>
 
-<ResponseField name="virtualAccountNo" type="string | null">
-  A virtual account number the buyer can pay into. May be `null` until the agreement is ready to receive funds.
+<ResponseField name="nombaVirtualAccountNo" type="string | null">
+  The NUBAN (Nigerian Uniform Bank Account Number) the buyer should transfer funds into. Display this to the buyer after creating the agreement.
+</ResponseField>
+
+<ResponseField name="nombaBank" type="string | null">
+  The receiving bank name — typically `"Nomba MFB"`. Display alongside `nombaVirtualAccountNo` so the buyer knows where to send payment.
 </ResponseField>
 
 <ResponseField name="totalAmount" type="number">
@@ -157,10 +161,14 @@ if (fundingCheck.flag === 'RED') {
 }
 
 if (fundingCheck.virtualAccount) {
-  const { accountNumber, bankCode, accountName } = fundingCheck.virtualAccount;
-  console.log(`Pay to: ${accountName} — ${accountNumber} (${bankCode})`);
+  const { accountNumber, bankName, accountName } = fundingCheck.virtualAccount;
+  console.log(`Pay to: ${accountName} — ${accountNumber} @ ${bankName}`);
 }
 ```
+
+<Note>
+  **How funding works:** Once the buyer transfers to the Nomba virtual account number, Nomba fires a `virtual_account.funded` webhook to Vouch automatically. Vouch reconciles the payment, updates the agreement status, and handles partial payments and overpayments — no polling required from your side.
+</Note>
 
 ### Parameters
 
@@ -195,19 +203,19 @@ if (fundingCheck.virtualAccount) {
 </ResponseField>
 
 <ResponseField name="virtualAccount" type="object">
-  Payment details for the buyer. Only returned on `GREEN` or `AMBER` responses.
+  Nomba virtual account payment details for the buyer. Only returned on `GREEN` or `AMBER` responses.
 
   <Expandable title="virtualAccount fields">
     <ResponseField name="virtualAccount.accountNumber" type="string">
-      The virtual account number to pay into.
+      The Nomba NUBAN the buyer should pay into.
     </ResponseField>
 
-    <ResponseField name="virtualAccount.bankCode" type="string">
-      The bank code for the receiving institution.
+    <ResponseField name="virtualAccount.bankName" type="string">
+      The receiving bank name, e.g. `"Nomba MFB"`.
     </ResponseField>
 
     <ResponseField name="virtualAccount.accountName" type="string">
-      The account name associated with the virtual account.
+      The account holder name associated with the virtual account.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -284,15 +292,15 @@ The response is the same `AgreementResponse` object returned by `create`. Refer 
 | Status | Meaning |
 |--------|---------|
 | `PENDING` | Agreement created, no funds received yet. |
-| `PARTIAL` | Buyer has made a partial payment. |
-| `FUNDED` | Full amount received and held in escrow. |
-| `OVERFUNDED` | More than the agreed amount was received. |
-| `IN_PROGRESS` | At least one milestone is being worked on. |
+| `PARTIAL` | Buyer has sent a partial payment. Vouch is accumulating payments until the full amount is reached. |
+| `FUNDED` | Full amount received and held in escrow. Work can begin. |
+| `OVERFUNDED` | Payment exceeded the agreed amount by more than 1%. Vouch automatically attempts to refund the excess to the sender's bank account. |
+| `IN_PROGRESS` | At least one milestone disbursement has been made. |
 | `COMPLETED` | All milestones confirmed by both parties. |
-| `DISBURSED` | Funds released to the seller. |
-| `REFUNDED` | Funds returned to the buyer. |
-| `FROZEN` | Agreement suspended pending review. |
+| `DISBURSED` | All milestone funds released to the seller. Terminal state. |
+| `REFUNDED` | Funds returned to the buyer. Terminal state. |
+| `FROZEN` | Agreement locked by a fraud signal. Terminal state — contact support. |
 
 <Warning>
-  Do not allow the seller to begin work on a milestone until the agreement status is `FUNDED`. Partial payments leave some milestones without sufficient coverage, which may delay disbursement.
+  Vouch reconciles payments via Nomba webhooks. Each bank transfer increments `amountReceived` — the agreement moves from `PARTIAL` to `FUNDED` automatically once the running total meets `totalAmount`. Do not allow the seller to begin work until the status is `FUNDED`.
 </Warning>

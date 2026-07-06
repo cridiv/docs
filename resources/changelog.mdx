@@ -1,100 +1,75 @@
 ---
-title: "Vouch SDK Changelog: Version History and Release Notes"
-sidebarTitle: "Changelog"
-description: "A complete version history of the Vouch SDK, including new features, improvements, and breaking integration changes across every release."
+title: "Nomba Payment Infrastructure"
+sidebarTitle: "Payment Infrastructure"
+description: "How Vouch uses Nomba virtual accounts, webhook reconciliation, and automatic overpayment refunds to power escrow funding."
 ---
 
-This page tracks every release of the Vouch SDK (`vouch-sdk`), from the initial launch through the current version. Each entry lists what changed, what was added, and any details you need to know when upgrading. Start with the current release and work backwards to understand what has changed since the version you are running.
-
----
-
-## v1.3.0 <span style={{color: '#6b7280', fontWeight: 400, fontSize: '0.9em'}}>(Current)</span>
-
-The current production release of the Vouch SDK. This version delivers a more reliable escrow funding experience and introduces a richer set of agreement status transitions.
-
-**Payment Infrastructure**
-- Updated payment infrastructure for improved virtual account reliability. Existing integration code that calls `vouch.escrow.createAgreement()` requires no changes — the improvement is transparent at the SDK level.
-- Improved virtual account provisioning reliability, reducing provisioning failures on agreement creation.
-
-**Escrow Status Machine**
-- Added three new agreement statuses to give you finer-grained visibility into the payment lifecycle:
-  - `PARTIAL` — funds received but below the agreed amount; wait for the remaining balance
-  - `OVERFUNDED` — payment exceeds the agreed amount; work proceeds, excess is flagged for review
-  - `REFUNDED` — funds returned to the buyer; agreement is closed
-- Updated `vouch.escrow.status()` to return these new statuses. Update any `switch` or `if` blocks in your integration that enumerate status values.
-
-<Note>
-If your integration uses exhaustive status checks (e.g., a `switch` statement that throws on unexpected values), add cases for `PARTIAL`, `OVERFUNDED`, and `REFUNDED` before upgrading to v1.3.0.
-</Note>
+Vouch's escrow funding is powered by **Nomba** — a Nigerian fintech infrastructure provider. When an escrow agreement is created, Vouch provisions a dedicated **Nomba Virtual Account** (a real NUBAN bank account number) that the buyer transfers funds into via any standard bank transfer.
 
 ---
 
-## v1.2.0
+## Virtual Account Provisioning
 
-A major upgrade to the identity verification pipeline, replacing single-image capture with a multi-frame video approach and integrating production-grade biometric and document intelligence models.
+Every escrow agreement gets its own unique Nomba Virtual Account. When you call `vouch.escrow.create()`, Vouch:
 
-**Identity Verification**
-- **Multi-frame video verification** — the SDK now captures 15 frames during a liveness session rather than a single selfie. Frame sampling adapts to device performance, reducing end-to-end verification time from approximately 48 seconds to approximately 18 seconds.
-- **Zero-click identity modal** — calling `vouch.identity.verify()` now automatically injects an iframe-based verification modal into the page. No additional UI code is required to launch the verification flow.
-- **Simplified result screen** — the verification modal closes with a clear status indicator: **VERIFICATION SECURE** on success or **CHECK FAILED** on rejection, replacing the previous technical output shown to users.
+1. Creates the agreement and milestone records in the database
+2. Calls the Nomba API to provision a virtual account tied to the agreement ID
+3. Returns the NUBAN and bank name in the response
 
-**AI and Biometric Models**
-- **Reducto AI integration** — document OCR and field extraction now use Reducto AI, delivering improved accuracy on low-resolution scans, laminated documents, and non-standard ID formats.
-- **ArcFace biometrics** — face matching now runs on the ArcFace model with a 90% similarity threshold, providing production-grade accuracy and reducing false matches.
+```typescript
+const agreement = await vouch.escrow.create({ ... });
 
-**Adaptive Frame Sampling**
-- The liveness capture module dynamically adjusts which of the 15 frames it submits based on image quality scores. Poor-quality frames (blur, low light, partial occlusion) are discarded automatically, reducing verification time and improving match reliability.
-
----
-
-## v1.1.0
-
-The first comprehensive SDK release, establishing the full three-module architecture that v1.2.0 and v1.3.0 build on.
-
-**SDK Architecture**
-- Published the full TypeScript SDK with three top-level modules:
-  - `vouch.identity` — document and selfie-based identity verification
-  - `vouch.fraud` — hybrid fraud scoring with deterministic rules and ML
-  - `vouch.escrow` — agreement creation, funding, milestone management, and disbursement
-- All modules are fully typed with TypeScript generics and return typed Promises.
-
-**Fraud Engine**
-- Introduced the **hybrid fraud engine** combining deterministic signal rules with a **LightGBM** gradient-boosted ML model. The engine scores transactions across behavioural, device, and contextual dimensions and returns a `GREEN`, `AMBER`, or `RED` flag.
-- Engine errors default to **AMBER** — the engine never auto-approves a transaction it cannot fully score.
-
-**Device Intelligence**
-- Automatic device fingerprint collection via **FingerprintJS** on every fraud assessment call. No additional setup required.
-- Exported the `getDeviceFingerprint()` utility for use cases where you need the fingerprint independently of a fraud assessment.
-
----
-
-## v1.0.0
-
-The initial public release of the Vouch SDK.
-
-**Identity Verification**
-- Basic identity verification flow: submit a document image and a selfie, receive a pass/fail result.
-
-**Fraud Scoring**
-- Basic fraud scoring endpoint: submit transaction context, receive a risk flag.
-
-**Escrow**
-- Create escrow agreements between a buyer and a seller.
-- Retrieve agreement status.
-- Confirm milestones and trigger disbursement.
-
----
-
-<Accordion title="How do I check which version I am running?">
-Run the following command in your project directory to see the installed version:
-
-```bash
-npm list vouch-sdk
+// Show the buyer where to send payment
+console.log(agreement.nombaVirtualAccountNo); // e.g. "9988771122"
+console.log(agreement.nombaBank);             // "Nomba MFB"
 ```
 
-Or check the `version` field in your `node_modules/vouch-sdk/package.json` file.
-</Accordion>
+The virtual account has **no expiry** — it stays open until the agreement is funded, so buyers can complete payment at any time without the account expiring.
 
-<Accordion title="Are there breaking changes between versions?">
-The `v1.0.0` → `v1.1.0` → `v1.2.0` upgrade path is additive. The `v1.3.0` release adds new status values (`PARTIAL`, `OVERFUNDED`, `REFUNDED`) to the escrow status machine — if your code performs exhaustive checks on status strings, update those checks before upgrading.
-</Accordion>
+---
+
+## Webhook-Driven Reconciliation
+
+Once the buyer transfers funds, Nomba fires a `virtual_account.funded` event to Vouch. Vouch:
+
+- Validates the **HMAC-SHA256 signature** on the raw request body
+- Acknowledges the request immediately (`200`) to prevent Nomba retries
+- Reconciles the payment asynchronously — matching the credited account number to the correct agreement
+- Increments the `amountReceived` running total
+- Derives the new agreement status (`PARTIAL`, `FUNDED`, or `OVERFUNDED`)
+- Emits an internal event to advance the escrow state machine
+
+See [Webhooks](/resources/webhooks) for the full reconciliation reference.
+
+---
+
+## Partial Payment Support
+
+Buyers can send funds in multiple transfers. Each bank transfer triggers a separate `virtual_account.funded` event, and Vouch accumulates them:
+
+| Running total | Agreement status |
+|---|---|
+| Below `totalAmount` | `PARTIAL` |
+| Equal to or above `totalAmount` | `FUNDED` |
+| More than `totalAmount × 1.01` | `OVERFUNDED` |
+
+---
+
+## Automatic Overpayment Refunds
+
+If a buyer sends more than 1% above the agreed amount, Vouch automatically initiates a refund of the excess back to the sender's bank account via the Nomba transfer API — no manual intervention required.
+
+---
+
+## Milestone Disbursement
+
+When both buyer and seller confirm a milestone, Vouch calls the Nomba transfer API to send the milestone amount directly to the seller's bank account. The seller provides their account number and bank code at confirmation time — Vouch does not store seller bank details before disbursement.
+
+```typescript
+await vouch.escrow.confirm(agreementId, milestoneId, externalUserId, {
+  sellerAccountNumber: '0123456789',
+  sellerBankCode: '058',
+});
+```
+
+A final fraud assessment runs on the seller before every disbursement. If the result is `RED`, the agreement is frozen and disbursement is blocked.

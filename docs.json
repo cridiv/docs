@@ -103,6 +103,8 @@
     }
   },
   "footer": {
-    "socials": {}
+    "socials": {
+      "github": "https://github.com/cridiv/vouchsdk"
+    }
   }
 }

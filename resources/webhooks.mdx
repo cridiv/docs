@@ -1,105 +1,135 @@
 ---
-title: "Tracking Escrow Events, Status Changes, and Polling"
+title: "Nomba Webhook Events & Payment Reconciliation"
 sidebarTitle: "Webhooks"
-description: "Learn how to track escrow agreement events, poll for status changes, and use the Vouch developer dashboard to monitor your integration in real time."
+description: "How Vouch uses Nomba webhooks to reconcile payments, handle partial and over-payments, and advance escrow agreements automatically."
 ---
 
-Vouch is designed around an event-driven escrow lifecycle. As buyers fund agreements, milestones get confirmed, and disbursements complete, the agreement moves through a well-defined set of statuses. Knowing when and how to react to these transitions is central to building a reliable integration. Today, Vouch surfaces these events through two mechanisms: programmatic polling via the SDK and the real-time audit log in the developer dashboard.
+Vouch uses a webhook-driven payment reconciliation model. When a buyer transfers funds into a Nomba Virtual Account, Nomba fires a `virtual_account.funded` event directly to the Vouch backend. Vouch validates the signature, reconciles the payment, and advances the escrow state machine automatically — no polling or manual confirmation needed from your integration.
 
-## Escrow Status Changes
+---
 
-Two approaches let you track what is happening inside an escrow agreement at any point in its lifecycle.
+## How It Works
 
-### 1. Polling with the SDK
-
-Call `vouch.escrow.status(agreementId)` at any time to fetch the current state of an agreement. This is the most straightforward approach and works well for low-frequency checks — for example, after a buyer confirms payment or when a seller marks a milestone as delivered.
-
-```typescript
-import Vouch from 'vouch-sdk';
-
-const vouch = new Vouch({ apiKey: 'your_api_key' });
-
-const agreement = await vouch.escrow.status('agr_abc123');
-console.log(agreement.status); // e.g. 'FUNDED'
+```
+Buyer transfers funds
+        │
+        ▼
+ Nomba Virtual Account
+        │
+        ▼
+ Nomba fires POST → /escrow/webhooks/nomba
+        │
+        ├─ Signature verified (HMAC-SHA256)
+        ├─ 200 acknowledged immediately
+        └─ Async reconcile:
+              ├─ Match account number → Agreement
+              ├─ Idempotency check (nombaReference unique)
+              ├─ Accumulate amountReceived
+              ├─ Derive new status (PARTIAL / FUNDED / OVERFUNDED)
+              ├─ Auto-refund excess if OVERFUNDED
+              └─ Advance escrow state machine
 ```
 
-### 2. Developer Dashboard
+You do not need to register or configure anything for this to work. The webhook endpoint is already configured on the Nomba dashboard for your sub-account.
 
-The Vouch developer dashboard provides a real-time view of every agreement in your account. Events such as payment receipt, milestone confirmation, fraud detection, and disbursement all appear in the audit log within seconds of occurring. Use the dashboard for monitoring, debugging, and reviewing the full event timeline of any agreement without writing any additional code.
+---
 
-## Polling Helper Example
+## Signature Verification
 
-If your workflow requires waiting for a specific status — for example, waiting for a buyer to fund an agreement before releasing instructions to a seller — you can build a lightweight polling helper around `vouch.escrow.status()`.
+Every incoming Nomba request is signed with **HMAC-SHA256** over the raw request body, delivered in the `nomba-signature` header. Vouch verifies this before processing any event — requests with a missing or mismatched signature are rejected with `401`.
+
+<Note>
+  The signature is computed over the raw request bytes. The Vouch backend applies `express.raw()` middleware to this route to prevent JSON parsing from modifying the body before the signature check.
+</Note>
+
+---
+
+## Supported Event Types
+
+| Event Type | Handled |
+|---|---|
+| `virtual_account.funded` | ✅ Fully handled — triggers reconciliation |
+| All other types | Acknowledged and ignored |
+
+---
+
+## Partial Payments
+
+If a buyer sends multiple transfers that collectively equal the agreed amount, Vouch handles it automatically. Each `virtual_account.funded` event increments the running `amountReceived` total:
+
+| `amountReceived` vs `totalAmount` | Status |
+|---|---|
+| `amountReceived < totalAmount` | `PARTIAL` |
+| `amountReceived >= totalAmount` | `FUNDED` |
+| `amountReceived > totalAmount × 1.01` | `OVERFUNDED` |
+
+Your integration only needs to watch for `FUNDED` before allowing work to begin. You do not need to track individual transfers.
+
+---
+
+## Overpayment Handling
+
+When the accumulated `amountReceived` exceeds `totalAmount` by more than 1%, Vouch:
+
+1. Sets the agreement to `OVERFUNDED`
+2. Calculates `excess = amountReceived - totalAmount`
+3. Reads the sender's bank details from the webhook payload
+4. Immediately calls the Nomba transfer API to refund the excess to the original sender
+5. Logs the outcome in your developer audit log as `OVERPAYMENT_FLAGGED`
+
+<Note>
+  Automatic refunds require the sender's account number and bank code to be present in the Nomba webhook payload. If these details are missing, the refund is skipped and logged with a reason — you can handle it manually from the developer dashboard.
+</Note>
+
+---
+
+## Idempotency
+
+Every Nomba event carries a unique `requestId`. Vouch stores this as `nombaReference` on the transfer record, which has a database-level unique constraint. If Nomba retries a delivery (common in production), the duplicate is detected and silently dropped — the agreement is never double-credited.
+
+---
+
+## Developer Audit Log Events
+
+Every reconciliation writes a structured entry to your developer log, visible in the dashboard:
+
+| `eventType` | When |
+|---|---|
+| `RECONCILIATION_MATCHED` | Payment matched and `amountReceived` updated |
+| `OVERPAYMENT_FLAGGED` | Payment exceeded tolerance; automatic refund attempted |
+| `ESCROW_FUNDED` | Agreement advanced to `FUNDED` |
+| `ESCROW_FUND_FAILED` | An error occurred during state machine advancement |
+
+---
+
+## Polling as a Fallback
+
+If you need to check agreement status from your frontend or in a background job, use `vouch.escrow.status()` at any time:
 
 ```typescript
 import Vouch from 'vouch-sdk';
 
-async function waitForFunding(
-  vouch: Vouch,
-  agreementId: string,
-  maxAttempts = 20,
-): Promise<Awaited<ReturnType<typeof vouch.escrow.status>>> {
+const vouch = new Vouch('your-api-key');
+
+const agreement = await vouch.escrow.status('agr_abc123');
+console.log(agreement.status); // 'PENDING' | 'PARTIAL' | 'FUNDED' | ...
+```
+
+For waiting on payment confirmation, a lightweight polling loop with a 5-second interval is a reliable approach for most bank transfer windows:
+
+```typescript
+async function waitForFunding(agreementId: string, maxAttempts = 24) {
   for (let i = 0; i < maxAttempts; i++) {
     const agreement = await vouch.escrow.status(agreementId);
-
     if (['FUNDED', 'OVERFUNDED'].includes(agreement.status)) {
       return agreement;
     }
-
-    // Wait 5 seconds before polling again
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 5000)); // wait 5 seconds
   }
-
-  throw new Error('Agreement funding timeout');
+  throw new Error('Funding timeout after 2 minutes');
 }
-
-// Usage
-const fundedAgreement = await waitForFunding(vouch, 'agr_abc123');
-console.log('Funds received — work can begin.');
 ```
 
 <Tip>
-Tune the `maxAttempts` and poll interval to match your expected payment window. For bank transfers, a 5-second interval over 20 attempts (100 seconds total) covers most instant payment scenarios. For manual transfers, consider a longer window or a user-triggered re-check.
+  For instant bank transfers (NIP), a 5-second poll interval over 24 attempts covers a 2-minute window — enough for the vast majority of payments. For manual transfers, consider a longer window or a user-triggered re-check button.
 </Tip>
-
-## Agreement Events Reference
-
-The table below documents every status an escrow agreement can reach, what it means, and what action your integration should take next.
-
-| Status | Meaning | Next Action |
-|--------|---------|-------------|
-| `PENDING` | Agreement created, awaiting payment | Share the virtual account details with the buyer |
-| `PARTIAL` | Some funds received, amount is below the agreed total | Notify the buyer of the outstanding balance; wait for full payment |
-| `FUNDED` | Full agreed amount received | Notify the seller — work can begin |
-| `OVERFUNDED` | Payment received exceeds the agreed amount | Review the excess with both parties; work proceeds normally |
-| `IN_PROGRESS` | Work has started | Await milestone delivery from the seller |
-| `COMPLETED` | All milestones confirmed by the buyer | Disbursement is being processed |
-| `DISBURSED` | Funds successfully sent to the seller | Agreement is closed |
-| `FROZEN` | Fraud signals detected on the agreement | Contact Vouch support immediately; do not proceed |
-| `REFUNDED` | Funds returned to the buyer | Agreement is closed; no further action required |
-
-<Warning>
-If an agreement reaches `FROZEN`, do not attempt to unblock it programmatically. Reach out to Vouch support with the agreement ID so the trust and safety team can review the fraud signals before any funds move.
-</Warning>
-
-## Dashboard Audit Logs
-
-The developer dashboard records a timestamped audit trail for every significant event in your account. Key events logged include:
-
-- **`IDENTITY_VERIFIED`** — a user completed identity verification successfully
-- **`FRAUD_BLOCKED`** — a transaction was halted due to RED fraud signals
-- **`DISBURSEMENT_COMPLETED`** — funds were successfully sent to the seller's account
-
-These logs let you reconstruct the exact sequence of events for any agreement without querying the API — useful for customer support investigations, compliance reviews, and debugging unexpected state transitions.
-
-<Accordion title="Can I receive push notifications instead of polling?">
-Outbound webhook delivery to your own endpoints is not yet available. Today, use the `vouch.escrow.status()` polling approach in your backend or monitor the developer dashboard for real-time updates. See the note below for the roadmap.
-</Accordion>
-
-<Accordion title="How often should I poll for status changes?">
-Poll at a cadence appropriate to your payment window. For most integrations, every 5–10 seconds over a 2–3 minute window covers instant bank transfers. Avoid polling more frequently than once per second, and always implement a maximum attempt cap to prevent infinite loops in your application.
-</Accordion>
-
-<Note>
-Full outbound webhook configuration — allowing Vouch to POST agreement events directly to your own endpoint — is planned for a future release. When available, you will be able to register webhook URLs in the developer dashboard and receive signed event payloads for all status transitions listed above.
-</Note>
